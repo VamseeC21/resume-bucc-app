@@ -25,6 +25,8 @@ export default function Grade() {
   const { user, role, loading: authLoading, signOut, isAdmin } = useAuth();
   const navigate = useNavigate();
   
+  const [currentGameId, setCurrentGameId] = useState<string | null>(null);
+  const [currentGameName, setCurrentGameName] = useState<string>('');
   const [pair, setPair] = useState<PairData | null>(null);
   const [pdfUrlA, setPdfUrlA] = useState<string | null>(null);
   const [pdfUrlB, setPdfUrlB] = useState<string | null>(null);
@@ -46,14 +48,15 @@ export default function Grade() {
   };
 
   const fetchNextPair = useCallback(async () => {
-    if (!user) return;
+    if (!user || !currentGameId) return;
     
     setIsLoading(true);
     setError(null);
     
     try {
       const { data, error } = await supabase.rpc('get_next_pair', {
-        p_user_id: user.id
+        p_user_id: user.id,
+        p_game_id: currentGameId
       });
 
       if (error) throw error;
@@ -82,41 +85,56 @@ export default function Grade() {
     } finally {
       setIsLoading(false);
     }
-  }, [user]);
+  }, [user, currentGameId]);
 
   const fetchComparisonCount = useCallback(async () => {
-    if (!user) return;
+    if (!user || !currentGameId) return;
     
     const { data, error } = await supabase.rpc('get_user_comparison_count', {
-      p_user_id: user.id
+      p_user_id: user.id,
+      p_game_id: currentGameId
     });
 
     if (!error && data !== null) {
       setTotalComparisons(data);
     }
-  }, [user]);
+  }, [user, currentGameId]);
 
   useEffect(() => {
     if (!authLoading && !user) {
       navigate('/auth');
+      return;
     }
+
+    // Check for current game
+    const gameId = localStorage.getItem('currentGameId');
+    const gameName = localStorage.getItem('currentGameName');
+    
+    if (!gameId) {
+      navigate('/select-game');
+      return;
+    }
+
+    setCurrentGameId(gameId);
+    setCurrentGameName(gameName || 'Current Game');
   }, [authLoading, user, navigate]);
 
   useEffect(() => {
-    if (user) {
+    if (user && currentGameId) {
       fetchNextPair();
       fetchComparisonCount();
     }
-  }, [user, fetchNextPair, fetchComparisonCount]);
+  }, [user, currentGameId]);
 
   const handleSelect = async (winnerId: string) => {
-    if (!user || !pair || isSubmitting) return;
+    if (!user || !pair || !currentGameId || isSubmitting) return;
 
     setIsSubmitting(true);
 
     try {
       const { data, error } = await supabase.rpc('submit_comparison', {
         p_user_id: user.id,
+        p_game_id: currentGameId,
         p_resume_a: pair.resumeA.id,
         p_resume_b: pair.resumeB.id,
         p_winner: winnerId
@@ -174,7 +192,12 @@ export default function Grade() {
               alt="Logo" 
               className="w-10 h-10 object-contain"
             />
-            <span className="font-semibold text-lg">Resume Sifter</span>
+            <div>
+              <span className="font-semibold text-lg">Resume Sifter</span>
+              {currentGameName && (
+                <span className="text-sm text-muted-foreground ml-2">• {currentGameName}</span>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-4">
@@ -182,6 +205,14 @@ export default function Grade() {
               <Trophy className="w-4 h-4 text-primary" />
               <span className="text-sm font-medium">{totalComparisons} comparisons</span>
             </div>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/select-game')}
+            >
+              Change Game
+            </Button>
             
             {isAdmin && (
               <Button

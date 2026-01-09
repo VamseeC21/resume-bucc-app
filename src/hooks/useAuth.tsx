@@ -10,7 +10,7 @@ interface AuthContextType {
   role: AppRole | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signUp: (email: string, password: string) => Promise<{ error: Error | null }>;
+  signUp: (email: string, password: string, firstName: string, lastName: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   isAdmin: boolean;
 }
@@ -73,14 +73,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error as Error | null };
   };
 
-  const signUp = async (email: string, password: string) => {
+  const signUp = async (email: string, password: string, firstName: string, lastName: string) => {
     const redirectUrl = `${window.location.origin}/`;
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: redirectUrl }
+      options: { 
+        emailRedirectTo: redirectUrl,
+        data: {
+          first_name: firstName,
+          last_name: lastName
+        }
+      }
     });
-    return { error: error as Error | null };
+    
+    if (error) {
+      return { error: error as Error };
+    }
+
+    // Update profile with first and last name
+    if (data.user) {
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ 
+          first_name: firstName,
+          last_name: lastName
+        })
+        .eq('id', data.user.id);
+
+      if (profileError) {
+        console.error('Error updating profile:', profileError);
+        // Don't fail signup if profile update fails - it will be created by trigger
+        // Try insert instead if update fails (profile might not exist yet)
+        await supabase
+          .from('profiles')
+          .upsert({ 
+            id: data.user.id,
+            first_name: firstName,
+            last_name: lastName,
+            role: 'grader'
+          });
+      }
+    }
+
+    return { error: null };
   };
 
   const signOut = async () => {

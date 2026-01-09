@@ -10,9 +10,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { 
   Loader2, Upload, Trophy, Users, FileText, ArrowLeft, Search,
-  ChevronUp, ChevronDown, Edit2, Check, X
+  ChevronUp, ChevronDown, Edit2, Check, X, Gamepad2, Plus, Copy, Eye
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -30,17 +31,30 @@ interface Resume {
 interface Comparison {
   id: string;
   created_at: string;
+  user_id: string;
   resume_a_id: string;
   resume_b_id: string;
   winner_id: string;
   resume_a_name?: string;
   resume_b_name?: string;
   winner_name?: string;
+  user_first_name?: string;
+  user_last_name?: string;
 }
 
 interface Profile {
   id: string;
   role: string;
+  created_at: string;
+  first_name?: string;
+  last_name?: string;
+}
+
+interface Game {
+  id: string;
+  name: string;
+  access_token: string;
+  created_by: string;
   created_at: string;
 }
 
@@ -48,9 +62,17 @@ export default function Admin() {
   const { user, isAdmin, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   
-  const [activeTab, setActiveTab] = useState('upload');
+  const [activeTab, setActiveTab] = useState('games');
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  
+  // Games state
+  const [games, setGames] = useState<Game[]>([]);
+  const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
+  const [selectedGameName, setSelectedGameName] = useState<string>('');
+  const [newGameName, setNewGameName] = useState('');
+  const [isCreatingGame, setIsCreatingGame] = useState(false);
+  const [newGameToken, setNewGameToken] = useState<string | null>(null);
   
   // Rankings state
   const [rankings, setRankings] = useState<Resume[]>([]);
@@ -68,20 +90,179 @@ export default function Admin() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editGrade, setEditGrade] = useState('');
+  
+  // Resume preview modal state
+  const [previewResume, setPreviewResume] = useState<Resume | null>(null);
+  const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
 
   useEffect(() => {
     if (!authLoading && (!user || !isAdmin)) {
-      navigate('/grade');
+      navigate('/select-game');
     }
   }, [authLoading, user, isAdmin, navigate]);
 
+  useEffect(() => {
+    if (user) {
+      // Load selected game from localStorage if exists
+      const savedGameId = localStorage.getItem('currentGameId');
+      if (savedGameId) {
+        setSelectedGameId(savedGameId);
+        const savedGameName = localStorage.getItem('currentGameName');
+        if (savedGameName) setSelectedGameName(savedGameName);
+      }
+      fetchGames();
+    }
+  }, [user]);
+
+  const fetchGames = useCallback(async () => {
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('games')
+        .select('*')
+        .eq('created_by', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setGames(data || []);
+      
+      // Auto-select first game if none selected and no saved game
+      if (data && data.length > 0) {
+        const savedGameId = localStorage.getItem('currentGameId');
+        if (!savedGameId) {
+          setSelectedGameId(data[0].id);
+          setSelectedGameName(data[0].name);
+          localStorage.setItem('currentGameId', data[0].id);
+          localStorage.setItem('currentGameName', data[0].name);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching games:', err);
+      toast.error('Failed to load games');
+    }
+  }, [user]);
+
+  const createGame = async () => {
+    if (!newGameName.trim() || !user) {
+      toast.error('Please enter a game name');
+      return;
+    }
+    
+    setIsCreatingGame(true);
+    console.log('Creating game:', { name: newGameName.trim(), userId: user.id });
+    
+    // Add timeout to prevent infinite loading
+    const timeoutId = setTimeout(() => {
+      console.error('RPC call timed out after 10 seconds');
+      toast.error('Request timed out. The function may not exist or there may be a database connection issue.');
+      setIsCreatingGame(false);
+    }, 10000);
+    
+    try {
+      console.log('Calling RPC create_game...');
+      const { data, error } = await supabase.rpc('create_game', {
+        p_name: newGameName.trim(),
+        p_created_by: user.id
+      });
+      
+      clearTimeout(timeoutId);
+
+      console.log('RPC Response:', { data, error });
+
+      if (error) {
+        console.error('RPC Error:', error);
+        toast.error(`Error: ${error.message || error.code || 'Unknown error'}`);
+        setIsCreatingGame(false);
+        return;
+      }
+
+      if (!data) {
+        console.error('No data returned');
+        toast.error('No response from server. Please check your database connection.');
+        setIsCreatingGame(false);
+        return;
+      }
+
+      // Handle case where function returns error in JSON
+      const result = typeof data === 'string' ? JSON.parse(data) : data;
+      
+      if (result.error) {
+        console.error('Function returned error:', result.error);
+        toast.error(result.error);
+        setIsCreatingGame(false);
+        return;
+      }
+
+      // Check if result has required fields
+      if (!result.id || !result.access_token) {
+        console.error('Invalid game result:', result);
+        toast.error('Invalid response format from server');
+        setIsCreatingGame(false);
+        return;
+      }
+
+      console.log('Game created successfully:', result);
+      toast.success(`Game "${result.name}" created!`);
+      setNewGameToken(result.access_token);
+      setNewGameName('');
+      
+      // Refresh games list
+      await fetchGames();
+      
+      // Auto-select the new game
+      setSelectedGameId(result.id);
+      setSelectedGameName(result.name);
+      localStorage.setItem('currentGameId', result.id);
+      localStorage.setItem('currentGameName', result.name);
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      console.error('Exception creating game:', err);
+      let errorMessage = 'Failed to create game. ';
+      
+      if (err.message?.includes('function') || err.message?.includes('does not exist')) {
+        errorMessage += 'The create_game function is missing. Please run the SQL migration in Supabase.';
+      } else if (err.message?.includes('permission') || err.message?.includes('policy')) {
+        errorMessage += 'Permission denied. Check your database policies.';
+      } else if (err.message) {
+        errorMessage += err.message;
+      } else if (err.code) {
+        errorMessage += `Error code: ${err.code}`;
+      } else {
+        errorMessage += 'Unknown error occurred. Check the console for details.';
+      }
+      
+      toast.error(errorMessage, { duration: 8000 });
+    } finally {
+      clearTimeout(timeoutId);
+      console.log('Setting isCreatingGame to false');
+      setIsCreatingGame(false);
+    }
+  };
+
+  const copyAccessToken = (token: string) => {
+    navigator.clipboard.writeText(token);
+    toast.success('Access token copied to clipboard!');
+  };
+
+  const selectGame = (game: Game) => {
+    setSelectedGameId(game.id);
+    setSelectedGameName(game.name);
+    localStorage.setItem('currentGameId', game.id);
+    localStorage.setItem('currentGameName', game.name);
+    fetchRankings();
+  };
+
   const fetchRankings = useCallback(async () => {
+    if (!selectedGameId) return;
+    
     setIsLoading(true);
     try {
-      // Fetch resumes with ratings
+      // Fetch resumes with ratings for selected game
       const { data: resumes, error: resumeError } = await supabase
         .from('resumes')
         .select('*')
+        .eq('game_id', selectedGameId)
         .order('created_at', { ascending: false });
 
       if (resumeError) throw resumeError;
@@ -115,30 +296,49 @@ export default function Admin() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [selectedGameId]);
 
   const fetchGraders = useCallback(async () => {
+    if (!selectedGameId) return;
+    
     try {
-      const { data, error } = await supabase
+      // Get unique graders who have participated in this game
+      const { data: comps } = await supabase
+        .from('comparisons')
+        .select('user_id')
+        .eq('game_id', selectedGameId)
+        .limit(1000);
+
+      if (!comps || comps.length === 0) {
+        setGraders([]);
+        return;
+      }
+
+      const uniqueUserIds = [...new Set(comps.map(c => c.user_id))];
+      
+      const { data: profiles, error } = await supabase
         .from('profiles')
-        .select('*')
-        .eq('role', 'grader')
+        .select('id, role, created_at, first_name, last_name')
+        .in('id', uniqueUserIds)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setGraders(data || []);
+      setGraders(profiles || []);
     } catch (err) {
       console.error('Error fetching graders:', err);
     }
-  }, []);
+  }, [selectedGameId]);
 
   const fetchComparisons = useCallback(async (graderId: string) => {
+    if (!selectedGameId) return;
+    
     setIsLoadingComparisons(true);
     try {
       const { data: comps, error } = await supabase
         .from('comparisons')
         .select('*')
         .eq('user_id', graderId)
+        .eq('game_id', selectedGameId)
         .order('created_at', { ascending: false })
         .limit(100);
 
@@ -159,11 +359,20 @@ export default function Admin() {
 
       const resumeMap = new Map(resumes?.map(r => [r.id, r.name]) || []);
 
+      // Get user profile with name
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('first_name, last_name')
+        .eq('id', graderId)
+        .single();
+
       const enriched = (comps || []).map(c => ({
         ...c,
         resume_a_name: resumeMap.get(c.resume_a_id) || 'Unknown',
         resume_b_name: resumeMap.get(c.resume_b_id) || 'Unknown',
-        winner_name: resumeMap.get(c.winner_id) || 'Unknown'
+        winner_name: resumeMap.get(c.winner_id) || 'Unknown',
+        user_first_name: profile?.first_name || null,
+        user_last_name: profile?.last_name || null
       }));
 
       setComparisons(enriched);
@@ -173,14 +382,15 @@ export default function Admin() {
     } finally {
       setIsLoadingComparisons(false);
     }
-  }, []);
+  }, [selectedGameId]);
 
   useEffect(() => {
-    if (user && isAdmin) {
+    if (user && isAdmin && selectedGameId) {
       fetchRankings();
       fetchGraders();
     }
-  }, [user, isAdmin, fetchRankings, fetchGraders]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isAdmin, selectedGameId]);
 
   useEffect(() => {
     if (selectedGrader) {
@@ -220,11 +430,18 @@ export default function Admin() {
         }
 
         // Create resume record (trigger creates elo_ratings)
+        if (!selectedGameId) {
+          toast.error('Please select a game first');
+          errorCount++;
+          continue;
+        }
+
         const { error: insertError } = await supabase
           .from('resumes')
           .insert({
             name: file.name.replace('.pdf', ''),
-            pdf_path: fileName
+            pdf_path: fileName,
+            game_id: selectedGameId
           });
 
         if (insertError) {
@@ -273,6 +490,26 @@ export default function Admin() {
     }
   };
 
+  const handlePreviewResume = async (resume: Resume) => {
+    setPreviewResume(resume);
+    setIsLoadingPreview(true);
+    setPreviewPdfUrl(null);
+
+    try {
+      const { data, error } = await supabase.storage
+        .from('resumes')
+        .createSignedUrl(resume.pdf_path, 3600); // 1 hour expiry
+
+      if (error) throw error;
+      setPreviewPdfUrl(data.signedUrl);
+    } catch (err) {
+      console.error('Error loading PDF:', err);
+      toast.error('Failed to load resume PDF');
+    } finally {
+      setIsLoadingPreview(false);
+    }
+  };
+
   const filteredRankings = rankings.filter(r => {
     const matchesGrade = gradeFilter === 'all' || r.grade === gradeFilter;
     const matchesSearch = r.name.toLowerCase().includes(searchQuery.toLowerCase());
@@ -314,6 +551,10 @@ export default function Admin() {
       <main className="container mx-auto px-4 py-8">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="mb-6">
+            <TabsTrigger value="games" className="flex items-center gap-2">
+              <Gamepad2 className="w-4 h-4" />
+              Games
+            </TabsTrigger>
             <TabsTrigger value="upload" className="flex items-center gap-2">
               <Upload className="w-4 h-4" />
               Upload Resumes
@@ -328,15 +569,157 @@ export default function Admin() {
             </TabsTrigger>
           </TabsList>
 
-          {/* Upload Tab */}
-          <TabsContent value="upload">
+          {/* Games Tab */}
+          <TabsContent value="games">
             <div className="grid gap-6 lg:grid-cols-2">
               <Card className="glass-panel">
                 <CardHeader>
-                  <CardTitle>Upload New Resumes</CardTitle>
-                  <CardDescription>Upload PDF files to add to the grading pool</CardDescription>
+                  <CardTitle>Create New Game</CardTitle>
+                  <CardDescription>Create a new resume comparison game</CardDescription>
                 </CardHeader>
                 <CardContent>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="gameName">Game Name</Label>
+                      <Input
+                        id="gameName"
+                        placeholder="e.g., Spring 2024 Resume Review"
+                        value={newGameName}
+                        onChange={(e) => setNewGameName(e.target.value)}
+                        disabled={isCreatingGame}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && newGameName.trim()) {
+                            createGame();
+                          }
+                        }}
+                      />
+                    </div>
+                    <Button 
+                      onClick={createGame} 
+                      disabled={!newGameName.trim() || isCreatingGame}
+                      className="w-full"
+                    >
+                      {isCreatingGame ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Creating...
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-4 h-4 mr-2" />
+                          Create Game
+                        </>
+                      )}
+                    </Button>
+                    {newGameToken && (
+                      <div className="p-4 rounded-lg bg-primary/10 border border-primary/20">
+                        <p className="text-sm font-medium mb-2">Game Created!</p>
+                        <p className="text-xs text-muted-foreground mb-2">Share this access token with participants:</p>
+                        <div className="flex items-center gap-2">
+                          <code className="flex-1 px-3 py-2 bg-background rounded border text-lg font-mono font-bold">
+                            {newGameToken}
+                          </code>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => copyAccessToken(newGameToken)}
+                          >
+                            <Copy className="w-4 h-4" />
+                          </Button>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="mt-2 w-full"
+                          onClick={() => setNewGameToken(null)}
+                        >
+                          Close
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="glass-panel">
+                <CardHeader>
+                  <CardTitle>My Games</CardTitle>
+                  <CardDescription>Games you've created</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {games.length === 0 ? (
+                      <p className="text-center text-muted-foreground py-8">
+                        No games created yet. Create your first game to get started.
+                      </p>
+                    ) : (
+                      games.map((game) => (
+                        <div
+                          key={game.id}
+                          className={`flex items-center justify-between p-4 rounded-lg border transition-colors ${
+                            selectedGameId === game.id
+                              ? 'border-primary bg-primary/5'
+                              : 'border-border hover:bg-muted/50 cursor-pointer'
+                          }`}
+                          onClick={() => selectGame(game)}
+                        >
+                          <div className="flex-1">
+                            <h3 className="font-semibold">{game.name}</h3>
+                            <p className="text-sm text-muted-foreground">
+                              Token: <code className="font-mono">{game.access_token}</code>
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Created {new Date(game.created_at).toLocaleDateString()}
+                            </p>
+                          </div>
+                          {selectedGameId === game.id && (
+                            <Badge variant="default">Active</Badge>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  {selectedGameId && (
+                    <div className="mt-4 p-3 rounded-lg bg-muted">
+                      <p className="text-sm font-medium mb-2">Currently Managing:</p>
+                      <p className="text-lg font-semibold">{selectedGameName}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        All uploads and rankings will be for this game
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          {/* Upload Tab */}
+          <TabsContent value="upload">
+            {!selectedGameId ? (
+              <Card className="glass-panel">
+                <CardContent className="py-12">
+                  <div className="text-center">
+                    <Gamepad2 className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                    <h3 className="text-lg font-semibold mb-2">No Game Selected</h3>
+                    <p className="text-muted-foreground mb-4">
+                      Please select or create a game first before uploading resumes.
+                    </p>
+                    <Button onClick={() => setActiveTab('games')}>
+                      Go to Games
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid gap-6 lg:grid-cols-2">
+                <Card className="glass-panel">
+                  <CardHeader>
+                    <CardTitle>Upload New Resumes</CardTitle>
+                    <CardDescription>
+                      Upload PDF files to add to "{selectedGameName}"
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
                   <div className="border-2 border-dashed border-border rounded-lg p-8 text-center hover:border-primary/50 transition-colors">
                     <input
                       type="file"
@@ -427,17 +810,36 @@ export default function Admin() {
                 </CardContent>
               </Card>
             </div>
+            )}
           </TabsContent>
 
           {/* Rankings Tab */}
           <TabsContent value="rankings">
-            <Card className="glass-panel">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Resume Rankings</CardTitle>
-                    <CardDescription>Sorted by Elo rating (highest to lowest)</CardDescription>
+            {!selectedGameId ? (
+              <Card className="glass-panel">
+                <CardContent className="py-12">
+                  <div className="text-center">
+                    <Gamepad2 className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                    <h3 className="text-lg font-semibold mb-2">No Game Selected</h3>
+                    <p className="text-muted-foreground mb-4">
+                      Please select or create a game first to view rankings.
+                    </p>
+                    <Button onClick={() => setActiveTab('games')}>
+                      Go to Games
+                    </Button>
                   </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="glass-panel">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Resume Rankings</CardTitle>
+                      <CardDescription>
+                        Sorted by Elo rating (highest to lowest) for "{selectedGameName}"
+                      </CardDescription>
+                    </div>
                   <div className="flex items-center gap-3">
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -477,7 +879,15 @@ export default function Admin() {
                     {filteredRankings.map((resume, index) => (
                       <TableRow key={resume.id}>
                         <TableCell>{getRankBadge(index)}</TableCell>
-                        <TableCell className="font-medium">{resume.name}</TableCell>
+                        <TableCell>
+                          <button
+                            onClick={() => handlePreviewResume(resume)}
+                            className="font-medium text-primary hover:underline flex items-center gap-2 cursor-pointer"
+                          >
+                            <Eye className="w-4 h-4" />
+                            {resume.name}
+                          </button>
+                        </TableCell>
                         <TableCell>
                           {resume.grade ? (
                             <Badge variant="secondary">{resume.grade}</Badge>
@@ -504,44 +914,72 @@ export default function Admin() {
                 </Table>
               </CardContent>
             </Card>
+            )}
           </TabsContent>
 
           {/* Audit Tab */}
           <TabsContent value="audit">
-            <div className="grid gap-6 lg:grid-cols-3">
-              <Card className="glass-panel lg:col-span-1">
-                <CardHeader>
-                  <CardTitle>Graders</CardTitle>
-                  <CardDescription>Select a grader to view their votes</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    {graders.map(grader => (
-                      <Button
-                        key={grader.id}
-                        variant={selectedGrader === grader.id ? 'default' : 'ghost'}
-                        className="w-full justify-start"
-                        onClick={() => setSelectedGrader(grader.id)}
-                      >
-                        <Users className="w-4 h-4 mr-2" />
-                        {grader.id.slice(0, 8)}...
-                      </Button>
-                    ))}
-                    {graders.length === 0 && (
-                      <p className="text-center text-muted-foreground py-4">
-                        No graders yet
-                      </p>
-                    )}
+            {!selectedGameId ? (
+              <Card className="glass-panel">
+                <CardContent className="py-12">
+                  <div className="text-center">
+                    <Gamepad2 className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                    <h3 className="text-lg font-semibold mb-2">No Game Selected</h3>
+                    <p className="text-muted-foreground mb-4">
+                      Please select or create a game first to view vote history.
+                    </p>
+                    <Button onClick={() => setActiveTab('games')}>
+                      Go to Games
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
+            ) : (
+              <div className="grid gap-6 lg:grid-cols-3">
+                <Card className="glass-panel lg:col-span-1">
+                  <CardHeader>
+                    <CardTitle>Graders</CardTitle>
+                    <CardDescription>Select a grader to view their votes in "{selectedGameName}"</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {graders.map(grader => {
+                        const displayName = grader.first_name && grader.last_name
+                          ? `${grader.first_name} ${grader.last_name}`
+                          : grader.first_name || grader.last_name || grader.id.slice(0, 8) + '...';
+                        return (
+                          <Button
+                            key={grader.id}
+                            variant={selectedGrader === grader.id ? 'default' : 'ghost'}
+                            className="w-full justify-start"
+                            onClick={() => setSelectedGrader(grader.id)}
+                          >
+                            <Users className="w-4 h-4 mr-2" />
+                            {displayName}
+                          </Button>
+                        );
+                      })}
+                      {graders.length === 0 && (
+                        <p className="text-center text-muted-foreground py-4">
+                          No graders yet for this game
+                        </p>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
 
               <Card className="glass-panel lg:col-span-2">
                 <CardHeader>
                   <CardTitle>Vote History</CardTitle>
                   <CardDescription>
                     {selectedGrader 
-                      ? `Showing votes for grader ${selectedGrader.slice(0, 8)}...`
+                      ? (() => {
+                          const grader = graders.find(g => g.id === selectedGrader);
+                          const graderName = grader?.first_name && grader?.last_name
+                            ? `${grader.first_name} ${grader.last_name}`
+                            : grader?.first_name || grader?.last_name || selectedGrader.slice(0, 8) + '...';
+                          return `Showing votes for ${graderName}`;
+                        })()
                       : 'Select a grader to view their vote history'
                     }
                   </CardDescription>
@@ -562,20 +1000,55 @@ export default function Admin() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {comparisons.map(comp => (
-                          <TableRow key={comp.id}>
-                            <TableCell className="text-muted-foreground">
-                              {new Date(comp.created_at).toLocaleString()}
-                            </TableCell>
-                            <TableCell>{comp.resume_a_name}</TableCell>
-                            <TableCell>{comp.resume_b_name}</TableCell>
-                            <TableCell>
-                              <Badge variant="default" className="bg-success">
-                                {comp.winner_name}
-                              </Badge>
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                        {comparisons.map(comp => {
+                          const handleResumeClick = async (resumeId: string) => {
+                            const { data } = await supabase
+                              .from('resumes')
+                              .select('*')
+                              .eq('id', resumeId)
+                              .single();
+                            if (data) {
+                              handlePreviewResume(data as Resume);
+                            }
+                          };
+                          
+                          return (
+                            <TableRow key={comp.id}>
+                              <TableCell className="text-muted-foreground">
+                                {new Date(comp.created_at).toLocaleString()}
+                              </TableCell>
+                              <TableCell>
+                                <button
+                                  onClick={() => handleResumeClick(comp.resume_a_id)}
+                                  className="text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  {comp.resume_a_name}
+                                </button>
+                              </TableCell>
+                              <TableCell>
+                                <button
+                                  onClick={() => handleResumeClick(comp.resume_b_id)}
+                                  className="text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  {comp.resume_b_name}
+                                </button>
+                              </TableCell>
+                              <TableCell>
+                                <button
+                                  onClick={() => handleResumeClick(comp.winner_id)}
+                                  className="flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Badge variant="default" className="bg-success hover:bg-success/80">
+                                    <Eye className="w-3 h-3 mr-1" />
+                                    {comp.winner_name}
+                                  </Badge>
+                                </button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
                         {comparisons.length === 0 && (
                           <TableRow>
                             <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
@@ -593,9 +1066,46 @@ export default function Admin() {
                 </CardContent>
               </Card>
             </div>
+            )}
           </TabsContent>
         </Tabs>
       </main>
+
+      {/* Resume Preview Modal */}
+      <Dialog open={!!previewResume} onOpenChange={(open) => !open && setPreviewResume(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>
+              {previewResume?.name}
+              {previewResume?.grade && (
+                <Badge variant="secondary" className="ml-3">
+                  {previewResume.grade}
+                </Badge>
+              )}
+            </DialogTitle>
+            <DialogDescription>
+              Preview resume PDF
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {isLoadingPreview ? (
+              <div className="flex items-center justify-center h-full">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              </div>
+            ) : previewPdfUrl ? (
+              <iframe
+                src={`${previewPdfUrl}#toolbar=0&navpanes=0`}
+                className="w-full h-full min-h-[600px] rounded border"
+                title={`Resume: ${previewResume?.name}`}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-muted-foreground">
+                Failed to load PDF
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

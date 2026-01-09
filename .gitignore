@@ -23,6 +23,10 @@ dist-ssr
 # Supabase
 .env.supabase
 
+# Ignore all SQL files EXCEPT migrations (keep supabase/migrations/*.sql)
+*.sql
+!supabase/migrations/*.sql
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
