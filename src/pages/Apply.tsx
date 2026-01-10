@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,12 +12,8 @@ import { toast } from 'sonner';
 
 export default function Apply() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const tokenParam = searchParams.get('token');
-
-  const [accessToken, setAccessToken] = useState(tokenParam || '');
   const [periodName, setPeriodName] = useState<string | null>(null);
-  const [isValidating, setIsValidating] = useState(false);
+  const [isLoadingPeriod, setIsLoadingPeriod] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
 
@@ -46,43 +42,35 @@ export default function Apply() {
   const [profilePictureFile, setProfilePictureFile] = useState<File | null>(null);
 
   useEffect(() => {
-    if (tokenParam) {
-      validateToken(tokenParam);
-    }
-  }, [tokenParam]);
+    // Automatically load the default application period on page load
+    loadDefaultPeriod();
+  }, []);
 
-  const validateToken = async (token: string) => {
-    if (!token.trim()) return;
-
-    setIsValidating(true);
+  const loadDefaultPeriod = async () => {
+    setIsLoadingPeriod(true);
     try {
-      const { data, error } = await supabase.rpc('validate_access_token', {
-        p_access_token: token.trim().toUpperCase(),
-      });
+      // Get the most recent game (default application period)
+      const { data, error } = await supabase
+        .from('games')
+        .select('id, name')
+        .order('created_at', { ascending: false })
+        .limit(1);
 
       if (error) throw error;
 
-      const result = data as unknown as { error?: string; valid?: boolean; name?: string };
-
-      if (result.error || !result.valid) {
-        toast.error(result.error || 'Invalid access token');
-        setPeriodName(null);
+      if (data && data.length > 0) {
+        setPeriodName(data[0].name);
       } else {
-        setPeriodName(result.name || null);
-        setAccessToken(token.trim().toUpperCase());
+        toast.error('No application period is currently available. Please contact the administrator.');
+        setPeriodName(null);
       }
     } catch (err: any) {
-      console.error('Error validating token:', err);
-      toast.error('Failed to validate access token');
+      console.error('Error loading default period:', err);
+      toast.error('Failed to load application period. Please try again later.');
       setPeriodName(null);
     } finally {
-      setIsValidating(false);
+      setIsLoadingPeriod(false);
     }
-  };
-
-  const handleAccessTokenSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    validateToken(accessToken);
   };
 
   const validateYouTubeUrl = (url: string): boolean => {
@@ -100,8 +88,8 @@ export default function Apply() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!periodName || !accessToken) {
-      toast.error('Please enter a valid access token first');
+    if (!periodName) {
+      toast.error('Application period not loaded. Please refresh the page.');
       return;
     }
 
@@ -216,9 +204,8 @@ export default function Apply() {
         }
       }
 
-      // Submit application via RPC
+      // Submit application via RPC (access token is optional, will use default if not provided)
       const { data, error } = await supabase.rpc('submit_application', {
-        p_access_token: accessToken.trim().toUpperCase(),
         p_applicant_name: formData.applicant_name.trim(),
         p_applicant_email: formData.applicant_email.trim().toLowerCase(),
         p_year: formData.year,
@@ -238,6 +225,7 @@ export default function Apply() {
         p_video_youtube_url: formData.video_youtube_url.trim(),
         p_video_question_2_choice: formData.video_question_2_choice,
         p_additional_info: formData.additional_info.trim() || null,
+        // p_access_token is optional and at the end - will use default period if not provided
       });
 
       if (error) {
@@ -303,56 +291,32 @@ export default function Apply() {
           <p className="text-muted-foreground">Submit your application for consideration</p>
         </div>
 
-        {/* Access Token Section */}
-        {!periodName && (
+        {/* Loading State */}
+        {isLoadingPeriod && (
           <Card className="glass-panel mb-6">
-            <CardHeader>
-              <CardTitle>Enter Access Token</CardTitle>
-              <CardDescription>Enter the 8-character access token provided to you</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleAccessTokenSubmit} className="space-y-4">
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Enter 8-character access token (e.g., A1B2C3D4)"
-                    value={accessToken}
-                    onChange={(e) => setAccessToken(e.target.value.toUpperCase())}
-                    maxLength={8}
-                    disabled={isValidating}
-                    className="flex-1"
-                  />
-                  <Button type="submit" disabled={!accessToken.trim() || isValidating}>
-                    {isValidating ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      'Continue'
-                    )}
-                  </Button>
-                </div>
-              </form>
+            <CardContent className="py-12">
+              <div className="flex items-center justify-center">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <span className="ml-3 text-muted-foreground">Loading application period...</span>
+              </div>
             </CardContent>
           </Card>
         )}
 
         {/* Application Period Info */}
-        {periodName && (
+        {!isLoadingPeriod && periodName && (
           <Card className="glass-panel mb-6 border-primary/20">
             <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Application Period</p>
-                  <p className="text-xl font-semibold">{periodName}</p>
-                </div>
-                <Button variant="outline" size="sm" onClick={() => setPeriodName(null)}>
-                  Change Token
-                </Button>
+              <div>
+                <p className="text-sm text-muted-foreground">Application Period</p>
+                <p className="text-xl font-semibold">{periodName}</p>
               </div>
             </CardContent>
           </Card>
         )}
 
         {/* Application Form */}
-        {periodName && (
+        {!isLoadingPeriod && periodName && (
           <Card className="glass-panel">
             <CardHeader>
               <CardTitle>Application Form</CardTitle>
