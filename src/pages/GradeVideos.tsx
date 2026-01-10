@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Loader2, LogOut, Settings, Trophy, Video, User, CheckCircle2 } from 'lucide-react';
+import { Loader2, LogOut, Settings, Trophy, Video, User, CheckCircle2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Application {
@@ -25,6 +25,8 @@ interface Application {
   video_question_2_choice?: string;
   submitted_at: string;
   graded: boolean;
+  grade_count?: number; // Total number of grades given to this application
+  is_graded_by_me?: boolean; // Whether current grader has graded this
 }
 
 // Helper function to get full name from first/last or fallback to applicant_name
@@ -174,14 +176,43 @@ export default function GradeVideos() {
 
   const loadApplicationDetails = async (applicationId: string) => {
     setIsLoadingDetails(true);
+    setSelectedApplication(null); // Reset to prevent showing stale data
     try {
       const { data, error } = await supabase.rpc('get_application_details', {
         p_application_id: applicationId,
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('RPC Error:', error);
+        throw error;
+      }
+
+      if (!data) {
+        console.error('No data returned from get_application_details');
+        throw new Error('No data returned from server');
+      }
+
+      // Handle case where function returns error JSON
+      const dataObj = data as any;
+      if (dataObj && dataObj.error) {
+        console.error('Application details error:', dataObj.error);
+        throw new Error(dataObj.error || 'Failed to load application');
+      }
+
+      // Handle case where function returns null (application not found)
+      if (data === null || (typeof data === 'object' && !data.id)) {
+        console.error('Application not found or invalid data:', data);
+        throw new Error('Application not found');
+      }
 
       const details = data as unknown as ApplicationDetails;
+      console.log('Loaded application details:', details);
+      
+      if (!details || !details.id) {
+        console.error('Invalid application data:', details);
+        throw new Error('Invalid application data received');
+      }
+      
       setSelectedApplication(details);
 
       // Load profile picture if exists
@@ -216,7 +247,8 @@ export default function GradeVideos() {
       }
     } catch (err: any) {
       console.error('Error loading application details:', err);
-      toast.error('Failed to load application details');
+      toast.error(err.message || 'Failed to load application details');
+      setSelectedApplication(null); // Close modal on error
     } finally {
       setIsLoadingDetails(false);
     }
@@ -269,7 +301,7 @@ export default function GradeVideos() {
         p_application_id: selectedApplication.id,
         p_grader_id: user.id,
         p_question_1_score: q1,
-        p_question_2_choice: selectedApplication.video_question_2_choice,
+        p_question_2_choice: selectedApplication?.video_question_2_choice || null,
         p_question_2_score: q2,
         p_notes: notes.trim() || null,
       });
@@ -283,14 +315,42 @@ export default function GradeVideos() {
 
       toast.success('Grade submitted successfully!');
       
-      // Refresh applications list
-      await fetchApplications();
+      // Refresh applications list to get updated grade counts
+      const { data: freshApps, error: fetchError } = await supabase.rpc('get_applications_for_grading', {
+        p_game_id: currentGameId!,
+        p_grader_id: user.id,
+        p_graded_only: false,
+      });
       
-      // Find next ungraded application
-      const ungraded = applications.filter((app) => !app.graded && app.id !== selectedApplication.id);
-      if (ungraded.length > 0) {
-        handleOpenApplication(ungraded[0]);
+      if (fetchError) {
+        console.error('Error fetching updated applications:', fetchError);
+      } else if (freshApps) {
+        // Update the applications list with fresh data
+        const appsList = (freshApps || []) as unknown as Application[];
+        setApplications(appsList);
+        
+        // Update the selected application with the new grade count
+        if (selectedApplication) {
+          const updated = appsList.find(app => app.id === selectedApplication.id);
+          if (updated) {
+            setSelectedApplication({
+              ...selectedApplication,
+              grade_count: updated.grade_count || 0,
+              is_graded_by_me: updated.is_graded_by_me,
+            });
+          }
+        }
+        
+        // Find next ungraded application (not graded by this user)
+        const ungraded = appsList.filter((app) => !app.is_graded_by_me && app.id !== selectedApplication?.id);
+        if (ungraded.length > 0) {
+          handleOpenApplication(ungraded[0]);
+        } else {
+          handleCloseModal();
+        }
       } else {
+        // Fallback: just refresh the list
+        await fetchApplications();
         handleCloseModal();
       }
     } catch (err: any) {
@@ -302,7 +362,7 @@ export default function GradeVideos() {
   };
 
   const getNextUngradedApplication = () => {
-    const ungraded = applications.filter((app) => !app.graded);
+    const ungraded = applications.filter((app) => !app.is_graded_by_me);
     if (ungraded.length === 0) return null;
     
     const currentIndex = selectedApplication 
@@ -318,7 +378,7 @@ export default function GradeVideos() {
     if (next) {
       handleOpenApplication(next);
     } else {
-      toast.info('All applications have been graded!');
+      toast.info('All applications have been graded by you!');
     }
   };
 
@@ -345,8 +405,10 @@ export default function GradeVideos() {
     );
   }
 
-  const ungradedCount = applications.filter((app) => !app.graded).length;
-  const gradedCount = applications.filter((app) => app.graded).length;
+  const ungradedByMeCount = applications.filter((app) => !app.is_graded_by_me).length;
+  const gradedByMeCount = applications.filter((app) => app.is_graded_by_me).length;
+  const completeCount = applications.filter((app) => (app.grade_count ?? 0) >= 3).length;
+  const pendingCount = applications.filter((app) => (app.grade_count ?? 0) < 3).length;
 
   return (
     <div className="min-h-screen bg-background">
@@ -367,7 +429,7 @@ export default function GradeVideos() {
             <div className="stat-card flex items-center gap-2 py-2">
               <Trophy className="w-4 h-4 text-primary" />
               <span className="text-sm font-medium">
-                {gradedCount} / {applications.length} graded
+                {gradedByMeCount} / {applications.length} graded by you
               </span>
             </div>
 
@@ -420,14 +482,22 @@ export default function GradeVideos() {
                 <CardDescription>Applications to grade for {currentGameName}</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
                   <div>
-                    <p className="text-2xl font-bold text-primary">{ungradedCount}</p>
-                    <p className="text-sm text-muted-foreground">Ungraded</p>
+                    <p className="text-2xl font-bold text-primary">{ungradedByMeCount}</p>
+                    <p className="text-sm text-muted-foreground">Not Graded by You</p>
                   </div>
                   <div>
-                    <p className="text-2xl font-bold text-green-600">{gradedCount}</p>
-                    <p className="text-sm text-muted-foreground">Graded</p>
+                    <p className="text-2xl font-bold text-green-600">{gradedByMeCount}</p>
+                    <p className="text-sm text-muted-foreground">Graded by You</p>
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-amber-600">{pendingCount}</p>
+                    <p className="text-sm text-muted-foreground">Pending (Need 3 grades)</p>
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-green-600">{completeCount}</p>
+                    <p className="text-sm text-muted-foreground">Complete (3+ grades)</p>
                   </div>
                   <div>
                     <p className="text-2xl font-bold">{applications.length}</p>
@@ -442,7 +512,8 @@ export default function GradeVideos() {
               <CardHeader>
                 <CardTitle>Applications</CardTitle>
                 <CardDescription>
-                  Click on an application to grade it. Ungraded applications are shown first.
+                  Click on an application to grade it. Each video needs 3 grades to be marked complete. 
+                  Applications you haven't graded are shown first.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -469,14 +540,32 @@ export default function GradeVideos() {
                           <p className="text-xs text-muted-foreground">{app.applicant_email}</p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        {app.graded ? (
-                          <Badge variant="outline" className="text-green-600 border-green-600">
+                      <div className="flex items-center gap-3">
+                        {/* Grade Count and Status Indicator */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-muted-foreground">
+                            Grades: {app.grade_count ?? 0}/3
+                          </span>
+                          {app.grade_count !== undefined && app.grade_count >= 3 ? (
+                            <Badge variant="outline" className="text-green-600 border-green-600 bg-green-50">
+                              <CheckCircle2 className="w-3 h-3 mr-1" />
+                              Complete
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-amber-600 border-amber-600 bg-amber-50">
+                              <AlertCircle className="w-3 h-3 mr-1" />
+                              Pending
+                            </Badge>
+                          )}
+                        </div>
+                        {/* Personal Grading Status */}
+                        {app.is_graded_by_me ? (
+                          <Badge variant="outline" className="text-blue-600 border-blue-600">
                             <CheckCircle2 className="w-3 h-3 mr-1" />
-                            Graded
+                            Graded by You
                           </Badge>
                         ) : (
-                          <Badge variant="outline" className="text-amber-600 border-amber-600">
+                          <Badge variant="outline" className="text-muted-foreground border-muted">
                             Pending
                           </Badge>
                         )}
@@ -522,6 +611,7 @@ export default function GradeVideos() {
           {isLoadingDetails ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              <span className="ml-3 text-muted-foreground">Loading application details...</span>
             </div>
           ) : selectedApplication ? (
             <div className="flex-1 min-h-0 overflow-y-auto space-y-6">
@@ -533,15 +623,15 @@ export default function GradeVideos() {
                 <CardContent className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <p className="text-muted-foreground">Email</p>
-                    <p className="font-medium">{selectedApplication.applicant_email}</p>
+                    <p className="font-medium">{selectedApplication?.applicant_email || 'N/A'}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Expected Graduation</p>
-                    <p className="font-medium">{selectedApplication.expected_graduation_year}</p>
+                    <p className="font-medium">{selectedApplication?.expected_graduation_year || 'N/A'}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Major</p>
-                    <p className="font-medium">{selectedApplication.major}</p>
+                    <p className="font-medium">{selectedApplication?.major || 'N/A'}</p>
                   </div>
                   {selectedApplication.minor && (
                     <div>
@@ -551,7 +641,7 @@ export default function GradeVideos() {
                   )}
                   <div>
                     <p className="text-muted-foreground">GPA</p>
-                    <p className="font-medium">{selectedApplication.gpa}</p>
+                    <p className="font-medium">{selectedApplication?.gpa || 'N/A'}</p>
                   </div>
                   {selectedApplication.military_affiliated && (
                     <div>
@@ -567,23 +657,29 @@ export default function GradeVideos() {
                 <CardHeader>
                   <CardTitle className="text-lg">Video Response</CardTitle>
                   <CardDescription>
-                    Question 2 Choice: {selectedApplication.video_question_2_choice === 'A' 
+                    Question 2 Choice: {selectedApplication?.video_question_2_choice === 'A' 
                       ? 'A - Something I care deeply about'
-                      : selectedApplication.video_question_2_choice === 'B'
+                      : selectedApplication?.video_question_2_choice === 'B'
                       ? 'B - A moment that changed my perspective'
                       : 'Not specified'}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="aspect-video rounded-lg overflow-hidden border">
-                    <iframe
-                      src={convertYouTubeUrlToEmbed(selectedApplication.video_youtube_url)}
-                      className="w-full h-full"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                      title={`Video: ${getFullName(selectedApplication)}`}
-                    />
-                  </div>
+                  {selectedApplication?.video_youtube_url ? (
+                    <div className="aspect-video rounded-lg overflow-hidden border">
+                      <iframe
+                        src={convertYouTubeUrlToEmbed(selectedApplication.video_youtube_url)}
+                        className="w-full h-full"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                        title={`Video: ${getFullName(selectedApplication)}`}
+                      />
+                    </div>
+                  ) : (
+                    <div className="aspect-video rounded-lg border flex items-center justify-center bg-muted">
+                      <p className="text-muted-foreground">No video URL provided</p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -619,9 +715,11 @@ export default function GradeVideos() {
                   <div className="space-y-3">
                     <Label>
                       Question #2:{' '}
-                      {selectedApplication.video_question_2_choice === 'A'
+                      {selectedApplication?.video_question_2_choice === 'A'
                         ? 'What\'s something you care deeply about?'
-                        : 'What\'s a moment that changed your perspective?'}{' '}
+                        : selectedApplication?.video_question_2_choice === 'B'
+                        ? 'What\'s a moment that changed your perspective?'
+                        : 'Question #2'}{' '}
                       <span className="text-red-500">*</span>
                     </Label>
                     <RadioGroup
@@ -668,7 +766,7 @@ export default function GradeVideos() {
                         'Submit Grade'
                       )}
                     </Button>
-                    {ungradedCount > 1 && (
+                    {ungradedByMeCount > 1 && (
                       <Button variant="outline" onClick={handleNext}>
                         Next Ungraded
                       </Button>
@@ -677,7 +775,18 @@ export default function GradeVideos() {
                 </CardContent>
               </Card>
             </div>
-          ) : null}
+          ) : (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <AlertCircle className="w-12 h-12 text-muted-foreground mb-4" />
+              <p className="text-lg font-semibold mb-2">Failed to Load Application</p>
+              <p className="text-sm text-muted-foreground mb-4">
+                Unable to load application details. Please try again or check the console for errors.
+              </p>
+              <Button variant="outline" onClick={handleCloseModal}>
+                Close
+              </Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
