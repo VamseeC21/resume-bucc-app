@@ -8,6 +8,8 @@ import Auth from "./pages/Auth";
 import SelectGame from "./pages/SelectGame";
 import Grade from "./pages/Grade";
 import Admin from "./pages/Admin";
+import Apply from "./pages/Apply";
+import GradeVideos from "./pages/GradeVideos";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -22,8 +24,10 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Navigate to="/select-game" replace />} />
             <Route path="/auth" element={<Auth />} />
+            <Route path="/apply" element={<Apply />} />
             <Route path="/select-game" element={<SelectGame />} />
             <Route path="/grade" element={<Grade />} />
+            <Route path="/grade-videos" element={<GradeVideos />} />
             <Route path="/admin" element={<Admin />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
