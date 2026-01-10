@@ -5,7 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, ChevronLeft, ChevronRight, LogOut, Settings, Trophy } from 'lucide-react';
+import { Loader2, ChevronLeft, ChevronRight, LogOut, Settings, Trophy, Video } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface ResumeData {
@@ -211,7 +211,16 @@ export default function Grade() {
               size="sm"
               onClick={() => navigate('/select-game')}
             >
-              Change Game
+              Change Application Period
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/grade-videos')}
+            >
+              <Video className="w-4 h-4 mr-2" />
+              Grade Videos
             </Button>
             
             {isAdmin && (

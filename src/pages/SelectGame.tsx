@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, Gamepad2, Plus, LogOut } from 'lucide-react';
+import { Loader2, Gamepad2, Plus, LogOut, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Game {
@@ -114,7 +114,7 @@ export default function SelectGame() {
       localStorage.setItem('currentGameId', result.id);
       localStorage.setItem('currentGameName', result.name);
       
-      toast.success(`Joined game: ${result.name}`);
+      toast.success(`Joined application period: ${result.name}`);
       navigate('/grade');
     } catch (err: any) {
       console.error('Error joining game:', err);
@@ -127,6 +127,7 @@ export default function SelectGame() {
   const handleSelectGame = (game: Game) => {
     localStorage.setItem('currentGameId', game.id);
     localStorage.setItem('currentGameName', game.name);
+    // Navigate to grade page by default, but user can switch to video grading
     navigate('/grade');
   };
 
@@ -161,15 +162,37 @@ export default function SelectGame() {
           </Button>
         </div>
 
-        {/* Join Game Card */}
+        {/* Student Application Link */}
+        <Card className="glass-panel mb-6 border-primary/20">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              Are you a student?
+            </CardTitle>
+            <CardDescription>
+              Submit your application using the access token provided to you
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => navigate('/apply')}
+            >
+              <ExternalLink className="w-4 h-4 mr-2" />
+              Go to Application Submission Page
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Join Application Period Card */}
         <Card className="glass-panel mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Gamepad2 className="w-5 h-5" />
-              Join a Game
+              Join Application Period
             </CardTitle>
             <CardDescription>
-              Enter an access token to join a resume comparison game
+              Enter an access token to join an application period for grading
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -209,15 +232,15 @@ export default function SelectGame() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle>My Games</CardTitle>
+                <CardTitle>My Application Periods</CardTitle>
                 <CardDescription>
-                  Games you created or are participating in
+                  Application periods you created or are participating in
                 </CardDescription>
               </div>
               {isAdmin && (
                 <Button onClick={handleCreateGame}>
                   <Plus className="w-4 h-4 mr-2" />
-                  Create New Game
+                  Create New Application Period
                 </Button>
               )}
             </div>
@@ -226,7 +249,7 @@ export default function SelectGame() {
             {myGames.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 <Gamepad2 className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No games yet. Join a game or create one to get started.</p>
+                <p>No application periods yet. Join one or create one to get started.</p>
                 {isAdmin && (
                   <Button 
                     className="mt-4" 
@@ -234,7 +257,7 @@ export default function SelectGame() {
                     variant="outline"
                   >
                     <Plus className="w-4 h-4 mr-2" />
-                    Create Your First Game
+                    Create Your First Application Period
                   </Button>
                 )}
               </div>

@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { 
   Loader2, Upload, Trophy, Users, FileText, ArrowLeft, Search,
-  ChevronUp, ChevronDown, Edit2, Check, X, Gamepad2, Plus, Copy, Eye
+  ChevronUp, ChevronDown, Edit2, Check, X, Gamepad2, Plus, Copy, Eye, Video, User
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -58,6 +58,74 @@ interface Game {
   created_at: string;
 }
 
+interface Application {
+  id: string;
+  applicant_name: string;
+  applicant_email: string;
+  year: string;
+  major: string;
+  profile_picture_path?: string;
+  video_youtube_url: string;
+  video_question_2_choice?: string;
+  submitted_at: string;
+  status: string;
+  resume_id?: string;
+  average_video_score?: number;
+  video_grade_count?: number;
+}
+
+// Component to display application profile picture
+function ApplicationProfilePicture({ path, name }: { path?: string; name: string }) {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!path) {
+      setIsLoading(false);
+      return;
+    }
+
+    const loadImage = async () => {
+      try {
+        const { data, error } = await supabase.storage
+          .from('profile-pictures')
+          .createSignedUrl(path, 3600);
+
+        if (!error && data) {
+          setImageUrl(data.signedUrl);
+        }
+      } catch (err) {
+        console.error('Error loading profile picture:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadImage();
+  }, [path]);
+
+  if (isLoading) {
+    return (
+      <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+        <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!imageUrl) {
+    return (
+      <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+        <User className="w-8 h-8 text-primary" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center overflow-hidden flex-shrink-0">
+      <img src={imageUrl} alt={name} className="w-full h-full object-cover" />
+    </div>
+  );
+}
+
 export default function Admin() {
   const { user, isAdmin, loading: authLoading } = useAuth();
   const navigate = useNavigate();
@@ -95,6 +163,11 @@ export default function Admin() {
   const [previewResume, setPreviewResume] = useState<Resume | null>(null);
   const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+
+  // Applications state
+  const [applications, setApplications] = useState<Application[]>([]);
+  const [isLoadingApplications, setIsLoadingApplications] = useState(false);
+  const [applicationSearchQuery, setApplicationSearchQuery] = useState('');
 
   useEffect(() => {
     if (!authLoading && (!user || !isAdmin)) {
@@ -145,7 +218,7 @@ export default function Admin() {
 
   const createGame = async () => {
     if (!newGameName.trim() || !user) {
-      toast.error('Please enter a game name');
+      toast.error('Please enter an application period name');
       return;
     }
     
@@ -384,13 +457,76 @@ export default function Admin() {
     }
   }, [selectedGameId]);
 
+  const fetchApplications = useCallback(async () => {
+    if (!selectedGameId) return;
+
+    setIsLoadingApplications(true);
+    try {
+      // Fetch applications with video grade stats
+      const { data: apps, error: appsError } = await supabase
+        .from('applications')
+        .select('*')
+        .eq('game_id', selectedGameId)
+        .order('submitted_at', { ascending: false });
+
+      if (appsError) throw appsError;
+
+      // Get video grade stats for each application
+      if (apps && apps.length > 0) {
+        const applicationIds = apps.map(a => a.id);
+        const { data: grades, error: gradesError } = await supabase
+          .from('video_grades')
+          .select('application_id, total_score')
+          .in('application_id', applicationIds);
+
+        if (!gradesError && grades) {
+          // Calculate average scores per application
+          const gradeMap = new Map<string, number[]>();
+          grades.forEach(g => {
+            if (!gradeMap.has(g.application_id)) {
+              gradeMap.set(g.application_id, []);
+            }
+            gradeMap.get(g.application_id)!.push(g.total_score);
+          });
+
+          const enriched = apps.map(app => {
+            const scores = gradeMap.get(app.id) || [];
+            const avgScore = scores.length > 0
+              ? scores.reduce((a, b) => a + b, 0) / scores.length
+              : null;
+            
+            return {
+              ...app,
+              average_video_score: avgScore,
+              video_grade_count: scores.length,
+            };
+          });
+
+          setApplications(enriched);
+        } else {
+          setApplications(apps.map(app => ({ ...app, average_video_score: null, video_grade_count: 0 })));
+        }
+      } else {
+        setApplications([]);
+      }
+    } catch (err) {
+      console.error('Error fetching applications:', err);
+      toast.error('Failed to load applications');
+    } finally {
+      setIsLoadingApplications(false);
+    }
+  }, [selectedGameId]);
+
   useEffect(() => {
     if (user && isAdmin && selectedGameId) {
       fetchRankings();
       fetchGraders();
+      if (activeTab === 'applications') {
+        fetchApplications();
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, isAdmin, selectedGameId]);
+  }, [user, isAdmin, selectedGameId, activeTab]);
 
   useEffect(() => {
     if (selectedGrader) {
@@ -553,7 +689,7 @@ export default function Admin() {
           <TabsList className="mb-6">
             <TabsTrigger value="games" className="flex items-center gap-2">
               <Gamepad2 className="w-4 h-4" />
-              Games
+              Application Periods
             </TabsTrigger>
             <TabsTrigger value="upload" className="flex items-center gap-2">
               <Upload className="w-4 h-4" />
@@ -567,23 +703,27 @@ export default function Admin() {
               <Users className="w-4 h-4" />
               Audit / Votes
             </TabsTrigger>
+            <TabsTrigger value="applications" className="flex items-center gap-2">
+              <Video className="w-4 h-4" />
+              Applications
+            </TabsTrigger>
           </TabsList>
 
-          {/* Games Tab */}
+          {/* Application Periods Tab */}
           <TabsContent value="games">
             <div className="grid gap-6 lg:grid-cols-2">
               <Card className="glass-panel">
                 <CardHeader>
-                  <CardTitle>Create New Game</CardTitle>
-                  <CardDescription>Create a new resume comparison game</CardDescription>
+                  <CardTitle>Create New Application Period</CardTitle>
+                  <CardDescription>Create a new application period for student submissions</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
                     <div className="space-y-2">
-                      <Label htmlFor="gameName">Game Name</Label>
+                      <Label htmlFor="gameName">Application Period Name</Label>
                       <Input
                         id="gameName"
-                        placeholder="e.g., Spring 2024 Resume Review"
+                        placeholder="e.g., BUCC 2025 Fall"
                         value={newGameName}
                         onChange={(e) => setNewGameName(e.target.value)}
                         disabled={isCreatingGame}
@@ -607,14 +747,14 @@ export default function Admin() {
                       ) : (
                         <>
                           <Plus className="w-4 h-4 mr-2" />
-                          Create Game
+                          Create Application Period
                         </>
                       )}
                     </Button>
                     {newGameToken && (
                       <div className="p-4 rounded-lg bg-primary/10 border border-primary/20">
-                        <p className="text-sm font-medium mb-2">Game Created!</p>
-                        <p className="text-xs text-muted-foreground mb-2">Share this access token with participants:</p>
+                        <p className="text-sm font-medium mb-2">Application Period Created!</p>
+                        <p className="text-xs text-muted-foreground mb-2">Share this access token with students:</p>
                         <div className="flex items-center gap-2">
                           <code className="flex-1 px-3 py-2 bg-background rounded border text-lg font-mono font-bold">
                             {newGameToken}
@@ -643,14 +783,14 @@ export default function Admin() {
 
               <Card className="glass-panel">
                 <CardHeader>
-                  <CardTitle>My Games</CardTitle>
-                  <CardDescription>Games you've created</CardDescription>
+                  <CardTitle>My Application Periods</CardTitle>
+                  <CardDescription>Application periods you've created</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2">
                     {games.length === 0 ? (
                       <p className="text-center text-muted-foreground py-8">
-                        No games created yet. Create your first game to get started.
+                        No application periods created yet. Create your first application period to get started.
                       </p>
                     ) : (
                       games.map((game) => (
@@ -700,12 +840,12 @@ export default function Admin() {
                 <CardContent className="py-12">
                   <div className="text-center">
                     <Gamepad2 className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-                    <h3 className="text-lg font-semibold mb-2">No Game Selected</h3>
+                    <h3 className="text-lg font-semibold mb-2">No Application Period Selected</h3>
                     <p className="text-muted-foreground mb-4">
-                      Please select or create a game first before uploading resumes.
+                      Please select or create an application period first before uploading resumes.
                     </p>
                     <Button onClick={() => setActiveTab('games')}>
-                      Go to Games
+                      Go to Application Periods
                     </Button>
                   </div>
                 </CardContent>
@@ -822,7 +962,7 @@ export default function Admin() {
                     <Gamepad2 className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
                     <h3 className="text-lg font-semibold mb-2">No Game Selected</h3>
                     <p className="text-muted-foreground mb-4">
-                      Please select or create a game first to view rankings.
+                      Please select or create an application period first to view rankings.
                     </p>
                     <Button onClick={() => setActiveTab('games')}>
                       Go to Games
@@ -926,7 +1066,7 @@ export default function Admin() {
                     <Gamepad2 className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
                     <h3 className="text-lg font-semibold mb-2">No Game Selected</h3>
                     <p className="text-muted-foreground mb-4">
-                      Please select or create a game first to view vote history.
+                      Please select or create an application period first to view vote history.
                     </p>
                     <Button onClick={() => setActiveTab('games')}>
                       Go to Games
@@ -1066,6 +1206,153 @@ export default function Admin() {
                 </CardContent>
               </Card>
             </div>
+            )}
+          </TabsContent>
+
+          {/* Applications Tab */}
+          <TabsContent value="applications">
+            {!selectedGameId ? (
+              <Card className="glass-panel">
+                <CardContent className="py-12">
+                  <div className="text-center">
+                    <Video className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                    <h3 className="text-lg font-semibold mb-2">No Application Period Selected</h3>
+                    <p className="text-muted-foreground mb-4">
+                      Please select or create an application period first to view applications.
+                    </p>
+                    <Button onClick={() => setActiveTab('games')}>
+                      Go to Application Periods
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-6">
+                <Card className="glass-panel">
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle>Student Applications</CardTitle>
+                        <CardDescription>
+                          Applications for {selectedGameName}
+                        </CardDescription>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          placeholder="Search by name or email..."
+                          value={applicationSearchQuery}
+                          onChange={(e) => setApplicationSearchQuery(e.target.value)}
+                          className="w-64"
+                        />
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {isLoadingApplications ? (
+                      <div className="flex items-center justify-center py-12">
+                        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                      </div>
+                    ) : applications.length === 0 ? (
+                      <div className="text-center py-12 text-muted-foreground">
+                        <Video className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                        <p>No applications submitted yet for this period.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {applications
+                          .filter(app => {
+                            if (!applicationSearchQuery) return true;
+                            const query = applicationSearchQuery.toLowerCase();
+                            return app.applicant_name.toLowerCase().includes(query) ||
+                                   app.applicant_email.toLowerCase().includes(query) ||
+                                   app.major.toLowerCase().includes(query);
+                          })
+                          .map((app) => (
+                            <Card key={app.id} className="border-border">
+                              <CardContent className="pt-6">
+                                <div className="flex items-start justify-between gap-4">
+                                  <div className="flex items-start gap-4 flex-1">
+<ApplicationProfilePicture path={app.profile_picture_path} name={app.applicant_name} />
+                                    <div className="flex-1 min-w-0">
+                                      <h3 className="font-semibold text-lg mb-1">{app.applicant_name}</h3>
+                                      <p className="text-sm text-muted-foreground mb-2">{app.applicant_email}</p>
+                                      <div className="flex flex-wrap gap-2 text-sm">
+                                        <Badge variant="secondary">{app.year}</Badge>
+                                        <Badge variant="secondary">{app.major}</Badge>
+                                        {app.minor && <Badge variant="outline">{app.minor} minor</Badge>}
+                                        {app.video_question_2_choice && (
+                                          <Badge variant="outline">
+                                            Q2: {app.video_question_2_choice}
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      {app.average_video_score !== null && (
+                                        <div className="mt-2">
+                                          <Badge variant="default" className="bg-green-600">
+                                            Avg Video Score: {app.average_video_score.toFixed(1)}/10
+                                            ({app.video_grade_count} {app.video_grade_count === 1 ? 'grade' : 'grades'})
+                                          </Badge>
+                                        </div>
+                                      )}
+                                      {app.video_grade_count === 0 && (
+                                        <Badge variant="outline" className="mt-2 text-amber-600 border-amber-600">
+                                          Not graded yet
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="flex flex-col gap-2">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => window.open(app.video_youtube_url, '_blank')}
+                                    >
+                                      <Video className="w-4 h-4 mr-2" />
+                                      Watch Video
+                                    </Button>
+                                    {app.resume_id && (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={async () => {
+                                          // Find resume and show in preview modal
+                                          const { data: resume } = await supabase
+                                            .from('resumes')
+                                            .select('*')
+                                            .eq('id', app.resume_id)
+                                            .single();
+                                          
+                                          if (resume) {
+                                            setPreviewResume(resume);
+                                            setIsLoadingPreview(true);
+                                            const { data, error } = await supabase.storage
+                                              .from('resumes')
+                                              .createSignedUrl(resume.pdf_path, 3600);
+                                            
+                                            if (!error && data) {
+                                              setPreviewPdfUrl(data.signedUrl);
+                                            }
+                                            setIsLoadingPreview(false);
+                                          }
+                                        }}
+                                      >
+                                        <FileText className="w-4 h-4 mr-2" />
+                                        View Resume
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="mt-4 pt-4 border-t text-xs text-muted-foreground">
+                                  Submitted: {new Date(app.submitted_at).toLocaleString()}
+                                </div>
+                              </CardContent>
+                            </Card>
+                          ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
             )}
           </TabsContent>
         </Tabs>
