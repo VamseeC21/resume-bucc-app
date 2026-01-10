@@ -19,7 +19,8 @@ export default function Apply() {
 
   // Form fields
   const [formData, setFormData] = useState({
-    applicant_name: '',
+    applicant_first_name: '',
+    applicant_last_name: '',
     applicant_email: '',
     year: '',
     expected_graduation_year: '',
@@ -94,8 +95,8 @@ export default function Apply() {
     }
 
     // Validate required fields
-    if (!formData.applicant_name.trim()) {
-      toast.error('Name is required');
+    if (!formData.applicant_first_name.trim()) {
+      toast.error('First name is required');
       return;
     }
     if (!formData.applicant_email.trim()) {
@@ -206,7 +207,8 @@ export default function Apply() {
 
       // Submit application via RPC (access token is optional, will use default if not provided)
       const { data, error } = await supabase.rpc('submit_application', {
-        p_applicant_name: formData.applicant_name.trim(),
+        p_applicant_first_name: formData.applicant_first_name.trim(),
+        p_applicant_last_name: formData.applicant_last_name.trim() || null,
         p_applicant_email: formData.applicant_email.trim().toLowerCase(),
         p_year: formData.year,
         p_expected_graduation_year: formData.expected_graduation_year,
@@ -330,24 +332,40 @@ export default function Apply() {
 
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label htmlFor="applicant_name">
-                        Name <span className="text-red-500">*</span>
+                      <Label htmlFor="applicant_first_name">
+                        First Name <span className="text-red-500">*</span>
                       </Label>
                       <Input
-                        id="applicant_name"
-                        placeholder="Brutus Buckeye"
-                        value={formData.applicant_name}
+                        id="applicant_first_name"
+                        placeholder="Brutus"
+                        value={formData.applicant_first_name}
                         onChange={(e) =>
-                          setFormData({ ...formData, applicant_name: e.target.value })
+                          setFormData({ ...formData, applicant_first_name: e.target.value })
                         }
                         required
                       />
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="applicant_email">
-                        Email <span className="text-red-500">*</span>
+                      <Label htmlFor="applicant_last_name">
+                        Last Name <span className="text-red-500">*</span>
                       </Label>
+                      <Input
+                        id="applicant_last_name"
+                        placeholder="Buckeye"
+                        value={formData.applicant_last_name}
+                        onChange={(e) =>
+                          setFormData({ ...formData, applicant_last_name: e.target.value })
+                        }
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="applicant_email">
+                      Email <span className="text-red-500">*</span>
+                    </Label>
                       <Input
                         id="applicant_email"
                         type="email"
@@ -358,7 +376,6 @@ export default function Apply() {
                         }
                         required
                       />
-                    </div>
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-2">

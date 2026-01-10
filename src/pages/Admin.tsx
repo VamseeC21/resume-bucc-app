@@ -60,7 +60,9 @@ interface Game {
 
 interface Application {
   id: string;
-  applicant_name: string;
+  applicant_name: string; // Keep for backward compatibility
+  first_name?: string;
+  last_name?: string;
   applicant_email: string;
   year: string;
   major: string;
@@ -72,6 +74,17 @@ interface Application {
   resume_id?: string;
   average_video_score?: number;
   video_grade_count?: number;
+}
+
+// Helper function to get full name from first/last or fallback to applicant_name
+function getFullName(app: Application): string {
+  if (app.first_name && app.last_name) {
+    return `${app.first_name} ${app.last_name}`.trim();
+  }
+  if (app.first_name) {
+    return app.first_name.trim();
+  }
+  return (app.applicant_name || 'Unknown').trim();
 }
 
 // Component to display application profile picture
@@ -1263,18 +1276,21 @@ export default function Admin() {
                           .filter(app => {
                             if (!applicationSearchQuery) return true;
                             const query = applicationSearchQuery.toLowerCase();
-                            return app.applicant_name.toLowerCase().includes(query) ||
+                            const fullName = getFullName(app).toLowerCase();
+                            return fullName.includes(query) ||
                                    app.applicant_email.toLowerCase().includes(query) ||
-                                   app.major.toLowerCase().includes(query);
+                                   (app.major && app.major.toLowerCase().includes(query));
                           })
-                          .map((app) => (
+                          .map((app) => {
+                            const fullName = getFullName(app);
+                            return (
                             <Card key={app.id} className="border-border">
                               <CardContent className="pt-6">
                                 <div className="flex items-start justify-between gap-4">
                                   <div className="flex items-start gap-4 flex-1">
-<ApplicationProfilePicture path={app.profile_picture_path} name={app.applicant_name} />
+<ApplicationProfilePicture path={app.profile_picture_path} name={fullName} />
                                     <div className="flex-1 min-w-0">
-                                      <h3 className="font-semibold text-lg mb-1">{app.applicant_name}</h3>
+                                      <h3 className="font-semibold text-lg mb-1">{fullName}</h3>
                                       <p className="text-sm text-muted-foreground mb-2">{app.applicant_email}</p>
                                       <div className="flex flex-wrap gap-2 text-sm">
                                         <Badge variant="secondary">{app.year}</Badge>
@@ -1347,7 +1363,8 @@ export default function Admin() {
                                 </div>
                               </CardContent>
                             </Card>
-                          ))}
+                          );
+                          })}
                       </div>
                     )}
                   </CardContent>
