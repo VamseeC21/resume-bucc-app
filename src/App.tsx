@@ -22,7 +22,7 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <Routes>
-            <Route path="/" element={<Navigate to="/select-game" replace />} />
+            <Route path="/" element={<Navigate to="/apply" replace />} />
             <Route path="/auth" element={<Auth />} />
             <Route path="/apply" element={<Apply />} />
             <Route path="/select-game" element={<SelectGame />} />
