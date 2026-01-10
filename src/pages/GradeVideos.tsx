@@ -14,7 +14,9 @@ import { toast } from 'sonner';
 
 interface Application {
   id: string;
-  applicant_name: string;
+  applicant_name: string; // Keep for backward compatibility
+  first_name?: string;
+  last_name?: string;
   applicant_email: string;
   year: string;
   major: string;
@@ -23,6 +25,17 @@ interface Application {
   video_question_2_choice?: string;
   submitted_at: string;
   graded: boolean;
+}
+
+// Helper function to get full name from first/last or fallback to applicant_name
+function getFullName(app: Application): string {
+  if (app.first_name && app.last_name) {
+    return `${app.first_name} ${app.last_name}`.trim();
+  }
+  if (app.first_name) {
+    return app.first_name.trim();
+  }
+  return (app.applicant_name || 'Unknown').trim();
 }
 
 // Component to display profile picture with signed URL
@@ -449,7 +462,7 @@ export default function GradeVideos() {
                           </div>
                         )}
                         <div>
-                          <h3 className="font-semibold">{app.applicant_name}</h3>
+                          <h3 className="font-semibold">{getFullName(app)}</h3>
                           <p className="text-sm text-muted-foreground">
                             {app.year} • {app.major}
                           </p>
@@ -488,7 +501,7 @@ export default function GradeVideos() {
               {profilePictureUrl ? (
                 <img
                   src={profilePictureUrl}
-                  alt={selectedApplication?.applicant_name}
+                  alt={selectedApplication ? getFullName(selectedApplication) : 'Profile picture'}
                   className="w-12 h-12 rounded-full object-cover"
                 />
               ) : (
@@ -497,7 +510,7 @@ export default function GradeVideos() {
                 </div>
               )}
               <div>
-                <div>{selectedApplication?.applicant_name}</div>
+                <div>{selectedApplication ? getFullName(selectedApplication) : 'Unknown'}</div>
                 <div className="text-sm font-normal text-muted-foreground">
                   {selectedApplication?.year} • {selectedApplication?.major}
                 </div>
@@ -568,7 +581,7 @@ export default function GradeVideos() {
                       className="w-full h-full"
                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                       allowFullScreen
-                      title={`Video: ${selectedApplication.applicant_name}`}
+                      title={`Video: ${getFullName(selectedApplication)}`}
                     />
                   </div>
                 </CardContent>
