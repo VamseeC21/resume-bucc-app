@@ -80,11 +80,6 @@ export default function Apply() {
     return youtubeRegex.test(url);
   };
 
-  const validateResumeFileName = (fileName: string): boolean => {
-    // Format: FirstName_LastName_Resume_Grade.pdf
-    const pattern = /^[A-Za-z]+_[A-Za-z]+_Resume_(Freshman|Sophomore|Junior|Senior)\.pdf$/i;
-    return pattern.test(fileName);
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -156,12 +151,6 @@ export default function Apply() {
     }
     if (!resumeFile) {
       toast.error('Resume PDF is required');
-      return;
-    }
-    if (!validateResumeFileName(resumeFile.name)) {
-      toast.error(
-        'Resume filename must be in format: FirstName_LastName_Resume_Grade.pdf (e.g., Buckeye_Brutus_Resume_Freshman.pdf)'
-      );
       return;
     }
     if (resumeFile.type !== 'application/pdf') {
@@ -672,13 +661,6 @@ export default function Apply() {
                       onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (file) {
-                          if (!validateResumeFileName(file.name)) {
-                            toast.error(
-                              'Resume filename must be: FirstName_LastName_Resume_Grade.pdf (e.g., Buckeye_Brutus_Resume_Freshman.pdf)'
-                            );
-                            e.target.value = '';
-                            return;
-                          }
                           setResumeFile(file);
                         }
                       }}
