@@ -246,10 +246,9 @@ export default function Apply() {
             <div className="text-center">
               <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto mb-4" />
               <h2 className="text-2xl font-bold mb-2">Application Submitted!</h2>
-              <p className="text-muted-foreground mb-6">
+              <p className="text-muted-foreground">
                 Thank you for your application. We'll review it and get back to you soon.
               </p>
-              <Button onClick={() => navigate('/apply')}>Submit Another Application</Button>
             </div>
           </CardContent>
         </Card>
