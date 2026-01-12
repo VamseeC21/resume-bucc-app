@@ -101,7 +101,7 @@ export default function Auth() {
               className="w-16 h-16 object-contain"
             />
           </div>
-          <h1 className="text-3xl font-bold text-foreground">Resume Sifter</h1>
+          <h1 className="text-3xl font-bold text-foreground">BUCC Application</h1>
           <p className="text-muted-foreground mt-2">Compare and rank resumes with ease</p>
         </div>
 

@@ -154,7 +154,7 @@ export default function SelectGame() {
               alt="Logo" 
               className="w-10 h-10 object-contain"
             />
-            <h1 className="text-2xl font-bold">Resume Sifter</h1>
+            <h1 className="text-2xl font-bold">BUCC Application</h1>
           </div>
           <Button variant="ghost" size="sm" onClick={signOut}>
             <LogOut className="w-4 h-4 mr-2" />

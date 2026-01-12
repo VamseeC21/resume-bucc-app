@@ -193,7 +193,7 @@ export default function Grade() {
               className="w-10 h-10 object-contain"
             />
             <div>
-              <span className="font-semibold text-lg">Resume Sifter</span>
+              <span className="font-semibold text-lg">BUCC Application</span>
               {currentGameName && (
                 <span className="text-sm text-muted-foreground ml-2">• {currentGameName}</span>
               )}
