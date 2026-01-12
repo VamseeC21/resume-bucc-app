@@ -706,57 +706,92 @@ export default function Admin() {
     }
   };
 
-  const exportFinalRankingsToCSV = () => {
+  const exportFinalRankingsToCSV = async () => {
     if (finalRankings.length === 0) {
       toast.error('No rankings data to export');
       return;
     }
 
-    const headers = [
-      'Rank',
-      'First Name',
-      'Last Name',
-      'Email',
-      'Year',
-      'Major',
-      'ELO Rating',
-      'Video Avg Score',
-      'ELO Normalized',
-      'Video Normalized',
-      'Combined Score'
-    ];
+    try {
+      // Generate signed URLs for all resume PDFs (24 hour expiry for CSV export)
+      const resumeUrls = await Promise.all(
+        finalRankings.map(async (ranking) => {
+          if (ranking.resume_pdf_path) {
+            try {
+              const { data, error } = await supabase.storage
+                .from('resumes')
+                .createSignedUrl(ranking.resume_pdf_path, 86400); // 24 hour expiry
+              
+              if (error) {
+                console.error('Error generating signed URL for resume:', error);
+                return null;
+              }
+              return data.signedUrl;
+            } catch (err) {
+              console.error('Error generating signed URL:', err);
+              return null;
+            }
+          }
+          return null;
+        })
+      );
 
-    const csvRows = [
-      headers.join(','),
-      ...finalRankings.map((ranking, index) => {
-        const row = [
-          index + 1,
-          `"${ranking.first_name || ''}"`,
-          `"${ranking.last_name || ''}"`,
-          `"${ranking.applicant_email || ''}"`,
-          `"${ranking.year || ''}"`,
-          `"${ranking.major || ''}"`,
-          ranking.elo_rating?.toFixed(2) || '',
-          ranking.video_avg_score?.toFixed(2) || '',
-          ranking.elo_normalized?.toFixed(2) || '',
-          ranking.video_normalized?.toFixed(2) || '',
-          ranking.combined_score?.toFixed(2) || ''
-        ];
-        return row.join(',');
-      })
-    ];
+      const headers = [
+        'Rank',
+        'First Name',
+        'Last Name',
+        'Email',
+        'Year',
+        'Major',
+        'ELO Rating',
+        'Video Avg Score',
+        'ELO Normalized',
+        'Video Normalized',
+        'Combined Score',
+        'Video Link',
+        'Resume PDF Link'
+      ];
 
-    const csvContent = csvRows.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `Final_Rankings_${selectedGameName.replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    toast.success('Rankings exported successfully');
+      const csvRows = [
+        headers.join(','),
+        ...finalRankings.map((ranking, index) => {
+          const videoLink = ranking.video_youtube_url || '';
+          const resumeLink = resumeUrls[index] || '';
+          
+          const row = [
+            index + 1,
+            `"${ranking.first_name || ''}"`,
+            `"${ranking.last_name || ''}"`,
+            `"${ranking.applicant_email || ''}"`,
+            `"${ranking.year || ''}"`,
+            `"${ranking.major || ''}"`,
+            ranking.elo_rating?.toFixed(2) || '',
+            ranking.video_avg_score?.toFixed(2) || '',
+            ranking.elo_normalized?.toFixed(2) || '',
+            ranking.video_normalized?.toFixed(2) || '',
+            ranking.combined_score?.toFixed(2) || '',
+            videoLink, // YouTube link - Excel/Sheets will make this clickable
+            resumeLink // Resume PDF link - Excel/Sheets will make this clickable
+          ];
+          return row.join(',');
+        })
+      ];
+
+      const csvContent = csvRows.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `Final_Rankings_${selectedGameName.replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success('Rankings exported successfully with links');
+    } catch (err) {
+      console.error('Error exporting CSV:', err);
+      toast.error('Failed to export rankings');
+    }
   };
 
   const handlePreviewResumeFromRanking = async (ranking: FinalRanking) => {
