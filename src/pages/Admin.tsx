@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { 
   Loader2, Upload, Trophy, Users, FileText, ArrowLeft, Search,
-  ChevronUp, ChevronDown, Edit2, Check, X, Gamepad2, Plus, Copy, Eye, Video, User
+  ChevronUp, ChevronDown, Edit2, Check, X, Gamepad2, Plus, Copy, Eye, Video, User, Award, Download
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -74,6 +74,24 @@ interface Application {
   resume_id?: string;
   average_video_score?: number;
   video_grade_count?: number;
+}
+
+interface FinalRanking {
+  application_id: string;
+  first_name: string;
+  last_name: string;
+  applicant_email: string;
+  year: string;
+  major: string;
+  video_youtube_url: string;
+  resume_id: string;
+  resume_pdf_path: string;
+  elo_rating: number;
+  video_avg_score: number;
+  video_grade_count: number;
+  elo_normalized: number;
+  video_normalized: number;
+  combined_score: number;
 }
 
 // Helper function to get full name from first/last or fallback to applicant_name
@@ -181,6 +199,10 @@ export default function Admin() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [isLoadingApplications, setIsLoadingApplications] = useState(false);
   const [applicationSearchQuery, setApplicationSearchQuery] = useState('');
+
+  // Final Rankings state
+  const [finalRankings, setFinalRankings] = useState<FinalRanking[]>([]);
+  const [isLoadingFinalRankings, setIsLoadingFinalRankings] = useState(false);
 
   useEffect(() => {
     if (!authLoading && (!user || !isAdmin)) {
@@ -530,12 +552,37 @@ export default function Admin() {
     }
   }, [selectedGameId]);
 
+  const fetchFinalRankings = useCallback(async () => {
+    if (!selectedGameId) return;
+
+    setIsLoadingFinalRankings(true);
+    try {
+      const { data, error } = await supabase.rpc('get_combined_rankings', {
+        p_game_id: selectedGameId,
+      });
+
+      if (error) throw error;
+
+      const rankings = (data || []) as unknown as FinalRanking[];
+      setFinalRankings(rankings);
+    } catch (err) {
+      console.error('Error fetching final rankings:', err);
+      toast.error('Failed to load final rankings');
+      setFinalRankings([]);
+    } finally {
+      setIsLoadingFinalRankings(false);
+    }
+  }, [selectedGameId]);
+
   useEffect(() => {
     if (user && isAdmin && selectedGameId) {
       fetchRankings();
       fetchGraders();
       if (activeTab === 'applications') {
         fetchApplications();
+      }
+      if (activeTab === 'final-rankings') {
+        fetchFinalRankings();
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -659,6 +706,71 @@ export default function Admin() {
     }
   };
 
+  const exportFinalRankingsToCSV = () => {
+    if (finalRankings.length === 0) {
+      toast.error('No rankings data to export');
+      return;
+    }
+
+    const headers = [
+      'Rank',
+      'First Name',
+      'Last Name',
+      'Email',
+      'Year',
+      'Major',
+      'ELO Rating',
+      'Video Avg Score',
+      'ELO Normalized',
+      'Video Normalized',
+      'Combined Score'
+    ];
+
+    const csvRows = [
+      headers.join(','),
+      ...finalRankings.map((ranking, index) => {
+        const row = [
+          index + 1,
+          `"${ranking.first_name || ''}"`,
+          `"${ranking.last_name || ''}"`,
+          `"${ranking.applicant_email || ''}"`,
+          `"${ranking.year || ''}"`,
+          `"${ranking.major || ''}"`,
+          ranking.elo_rating?.toFixed(2) || '',
+          ranking.video_avg_score?.toFixed(2) || '',
+          ranking.elo_normalized?.toFixed(2) || '',
+          ranking.video_normalized?.toFixed(2) || '',
+          ranking.combined_score?.toFixed(2) || ''
+        ];
+        return row.join(',');
+      })
+    ];
+
+    const csvContent = csvRows.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `Final_Rankings_${selectedGameName.replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success('Rankings exported successfully');
+  };
+
+  const handlePreviewResumeFromRanking = async (ranking: FinalRanking) => {
+    const resume: Resume = {
+      id: ranking.resume_id,
+      name: `${ranking.first_name} ${ranking.last_name}`,
+      grade: null,
+      pdf_path: ranking.resume_pdf_path,
+      active: true,
+      created_at: new Date().toISOString()
+    };
+    await handlePreviewResume(resume);
+  };
+
   const filteredRankings = rankings.filter(r => {
     const matchesGrade = gradeFilter === 'all' || r.grade === gradeFilter;
     const matchesSearch = r.name.toLowerCase().includes(searchQuery.toLowerCase());
@@ -719,6 +831,10 @@ export default function Admin() {
             <TabsTrigger value="applications" className="flex items-center gap-2">
               <Video className="w-4 h-4" />
               Applications
+            </TabsTrigger>
+            <TabsTrigger value="final-rankings" className="flex items-center gap-2">
+              <Award className="w-4 h-4" />
+              Final Rankings
             </TabsTrigger>
           </TabsList>
 
@@ -1370,6 +1486,127 @@ export default function Admin() {
                   </CardContent>
                 </Card>
               </div>
+            )}
+          </TabsContent>
+
+          {/* Final Rankings Tab */}
+          <TabsContent value="final-rankings">
+            {!selectedGameId ? (
+              <Card className="glass-panel">
+                <CardContent className="py-12">
+                  <div className="text-center">
+                    <Gamepad2 className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                    <h3 className="text-lg font-semibold mb-2">No Game Selected</h3>
+                    <p className="text-muted-foreground mb-4">
+                      Please select or create an application period first to view final rankings.
+                    </p>
+                    <Button onClick={() => setActiveTab('games')}>
+                      Go to Games
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="glass-panel">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Final Rankings - Combined Scores</CardTitle>
+                      <CardDescription>
+                        Rankings based on 60% ELO score + 40% video score for "{selectedGameName}"
+                      </CardDescription>
+                    </div>
+                    <Button
+                      onClick={exportFinalRankingsToCSV}
+                      disabled={finalRankings.length === 0 || isLoadingFinalRankings}
+                      variant="outline"
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      Export CSV
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {isLoadingFinalRankings ? (
+                    <div className="flex items-center justify-center py-12">
+                      <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                    </div>
+                  ) : finalRankings.length === 0 ? (
+                    <div className="text-center py-12">
+                      <Award className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                      <h3 className="text-lg font-semibold mb-2">No Rankings Available</h3>
+                      <p className="text-muted-foreground">
+                        No applications with both resume ELO ratings and video grades found for this period.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-16">Rank</TableHead>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Email</TableHead>
+                            <TableHead>Year</TableHead>
+                            <TableHead>Major</TableHead>
+                            <TableHead className="text-right">ELO Score</TableHead>
+                            <TableHead className="text-right">Video Avg</TableHead>
+                            <TableHead className="text-right font-bold">Combined Score</TableHead>
+                            <TableHead className="text-center">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {finalRankings.map((ranking, index) => (
+                            <TableRow key={ranking.application_id}>
+                              <TableCell className="font-semibold">
+                                {index === 0 && <span className="text-yellow-600">🥇</span>}
+                                {index === 1 && <span className="text-gray-400">🥈</span>}
+                                {index === 2 && <span className="text-orange-600">🥉</span>}
+                                {index > 2 && <span className="text-muted-foreground">{index + 1}</span>}
+                              </TableCell>
+                              <TableCell className="font-medium">
+                                {ranking.first_name} {ranking.last_name}
+                              </TableCell>
+                              <TableCell>{ranking.applicant_email}</TableCell>
+                              <TableCell>{ranking.year}</TableCell>
+                              <TableCell>{ranking.major || 'N/A'}</TableCell>
+                              <TableCell className="text-right">
+                                {ranking.elo_rating?.toFixed(0)}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {ranking.video_avg_score?.toFixed(2)}/10
+                              </TableCell>
+                              <TableCell className="text-right font-bold text-lg">
+                                {ranking.combined_score?.toFixed(2)}
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex items-center justify-center gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handlePreviewResumeFromRanking(ranking)}
+                                    title="View Resume"
+                                  >
+                                    <FileText className="w-4 h-4" />
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => window.open(ranking.video_youtube_url, '_blank')}
+                                    title="Watch Video"
+                                  >
+                                    <Video className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             )}
           </TabsContent>
         </Tabs>
