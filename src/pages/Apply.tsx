@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, CheckCircle2, AlertCircle, LogIn } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function Apply() {
@@ -257,20 +257,7 @@ export default function Apply() {
   }
 
   return (
-    <div className="min-h-screen bg-background p-4 relative">
-      {/* Login Button for Graders - Top Right */}
-      <div className="fixed top-4 right-4 z-50">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => navigate('/auth')}
-          className="bg-background/80 backdrop-blur-sm"
-        >
-          <LogIn className="w-4 h-4 mr-2" />
-          Grader Login
-        </Button>
-      </div>
-
+    <div className="min-h-screen bg-background p-4">
       <div className="container mx-auto max-w-4xl py-8">
         {/* Header */}
         <div className="text-center mb-8">
