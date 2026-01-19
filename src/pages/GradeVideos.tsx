@@ -687,53 +687,91 @@ export default function GradeVideos() {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-lg">Grading</CardTitle>
-                  <CardDescription>Rate each question on a scale of 1-5</CardDescription>
+                  <CardDescription>
+                    40%: Application (2.5 min video - CONTENT BASED, EDITING IS NOT FACTORED)
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   {/* Question 1 */}
                   <div className="space-y-3">
-                    <Label>
-                      Question #1: Why BUCC? <span className="text-red-500">*</span>
-                    </Label>
+                    <div>
+                      <Label className="text-base font-semibold">
+                        Question #1: Why BUCC? <span className="text-red-500">*</span>
+                      </Label>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Evaluate how clear, well-spoken, and personalized their response is
+                      </p>
+                    </div>
                     <RadioGroup
                       value={question1Score}
                       onValueChange={setQuestion1Score}
-                      className="flex gap-4"
+                      className="space-y-3"
                     >
-                      {[1, 2, 3, 4, 5].map((score) => (
-                        <div key={score} className="flex items-center space-x-2">
-                          <RadioGroupItem value={score.toString()} id={`q1-${score}`} />
-                          <Label htmlFor={`q1-${score}`} className="cursor-pointer">
-                            {score}
-                          </Label>
-                        </div>
+                      {[
+                        { score: 5, desc: 'Clear, very well spoken, interesting, differentiable (cohesively connects their response to themselves)' },
+                        { score: 4, desc: 'Above average response, genuine interest, minor issues (generic, less elaboration, etc)' },
+                        { score: 3, desc: 'Not bad but not a standout, knowledgeable about BUCC (mediocre)' },
+                        { score: 2, desc: 'Minimal effort, extremely generic (feels you can apply to any club with this – buzz word heavy w/ no personality)' },
+                        { score: 1, desc: 'No effort, incomplete - seemed forced to apply' },
+                      ].map(({ score, desc }) => (
+                        <Label
+                          key={score}
+                          htmlFor={`q1-${score}`}
+                          className="flex items-start space-x-3 p-3 rounded-lg border hover:bg-muted/50 transition-colors cursor-pointer"
+                        >
+                          <RadioGroupItem value={score.toString()} id={`q1-${score}`} className="mt-1" />
+                          <div className="flex-1">
+                            <span className="font-medium">
+                              {score}
+                            </span>
+                            <p className="text-sm text-muted-foreground mt-1">{desc}</p>
+                          </div>
+                        </Label>
                       ))}
                     </RadioGroup>
                   </div>
 
                   {/* Question 2 */}
                   <div className="space-y-3">
-                    <Label>
-                      Question #2:{' '}
-                      {selectedApplication?.video_question_2_choice === 'A'
-                        ? 'What\'s something you care deeply about?'
-                        : selectedApplication?.video_question_2_choice === 'B'
-                        ? 'What\'s a moment that changed your perspective?'
-                        : 'Question #2'}{' '}
-                      <span className="text-red-500">*</span>
-                    </Label>
+                    <div>
+                      <Label className="text-base font-semibold">
+                        Question #2:{' '}
+                        {selectedApplication?.video_question_2_choice === 'A'
+                          ? 'What\'s something you care deeply about?'
+                          : selectedApplication?.video_question_2_choice === 'B'
+                          ? 'What\'s a moment that changed your perspective?'
+                          : 'Question #2'}{' '}
+                        <span className="text-red-500">*</span>
+                      </Label>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Evaluate how much insight you gained about their personality
+                      </p>
+                    </div>
                     <RadioGroup
                       value={question2Score}
                       onValueChange={setQuestion2Score}
-                      className="flex gap-4"
+                      className="space-y-3"
                     >
-                      {[1, 2, 3, 4, 5].map((score) => (
-                        <div key={score} className="flex items-center space-x-2">
-                          <RadioGroupItem value={score.toString()} id={`q2-${score}`} />
-                          <Label htmlFor={`q2-${score}`} className="cursor-pointer">
-                            {score}
-                          </Label>
-                        </div>
+                      {[
+                        { score: 5, desc: 'Phenomenal Response, clearly gained insight into their personality, feel like I know them well' },
+                        { score: 4, desc: 'Above average response. I am invested in learning more about them' },
+                        { score: 3, desc: 'Average, I got to know them from their response' },
+                        { score: 2, desc: 'Generic/Not personable response' },
+                        { score: 1, desc: 'No effort, learned nothing new about the applicant' },
+                      ].map(({ score, desc }) => (
+                        <Label
+                          key={score}
+                          htmlFor={`q2-${score}`}
+                          className="flex items-start space-x-3 p-3 rounded-lg border hover:bg-muted/50 transition-colors cursor-pointer"
+                        >
+                          <RadioGroupItem value={score.toString()} id={`q2-${score}`} className="mt-1" />
+                          <div className="flex-1">
+                            <span className="font-medium">
+                              {score}
+                            </span>
+                            <p className="text-sm text-muted-foreground mt-1">{desc}</p>
+                          </div>
+                        </Label>
                       ))}
                     </RadioGroup>
                   </div>
