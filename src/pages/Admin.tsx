@@ -66,6 +66,7 @@ interface Application {
   applicant_email: string;
   year: string;
   major: string;
+  minor?: string;
   profile_picture_path?: string;
   video_youtube_url: string;
   video_question_2_choice?: string;
@@ -226,11 +227,12 @@ export default function Admin() {
   const fetchGames = useCallback(async () => {
     if (!user) return;
     try {
-      const { data, error } = await supabase
-        .from('games')
-        .select('*')
-        .eq('created_by', user.id)
-        .order('created_at', { ascending: false });
+      // Using type assertion because 'games' table exists but may not be in generated types
+      const query = supabase.from('games' as never).select('*').eq('created_by', user.id).order('created_at', { ascending: false });
+      const { data, error } = await query as { 
+        data: Game[] | null; 
+        error: Error | null 
+      };
 
       if (error) throw error;
       setGames(data || []);
@@ -269,10 +271,15 @@ export default function Admin() {
     
     try {
       console.log('Calling RPC create_game...');
-      const { data, error } = await supabase.rpc('create_game', {
+      // Using type assertion because 'create_game' function exists but may not be in generated types
+      const rpcCall = supabase.rpc('create_game' as never, {
         p_name: newGameName.trim(),
         p_created_by: user.id
-      });
+      } as never);
+      const { data, error } = await rpcCall as unknown as { 
+        data: { id: string; name: string; access_token: string; created_by: string; created_at: string } | null; 
+        error: Error | null 
+      };
       
       clearTimeout(timeoutId);
 
@@ -280,7 +287,8 @@ export default function Admin() {
 
       if (error) {
         console.error('RPC Error:', error);
-        toast.error(`Error: ${error.message || error.code || 'Unknown error'}`);
+        const errorMsg = error instanceof Error ? error.message : (error as { message?: string; code?: string }).message || (error as { code?: string }).code || 'Unknown error';
+        toast.error(`Error: ${errorMsg}`);
         setIsCreatingGame(false);
         return;
       }
@@ -323,19 +331,21 @@ export default function Admin() {
       setSelectedGameName(result.name);
       localStorage.setItem('currentGameId', result.id);
       localStorage.setItem('currentGameName', result.name);
-    } catch (err: any) {
+    } catch (err: unknown) {
       clearTimeout(timeoutId);
       console.error('Exception creating game:', err);
       let errorMessage = 'Failed to create game. ';
       
-      if (err.message?.includes('function') || err.message?.includes('does not exist')) {
-        errorMessage += 'The create_game function is missing. Please run the SQL migration in Supabase.';
-      } else if (err.message?.includes('permission') || err.message?.includes('policy')) {
-        errorMessage += 'Permission denied. Check your database policies.';
-      } else if (err.message) {
-        errorMessage += err.message;
-      } else if (err.code) {
-        errorMessage += `Error code: ${err.code}`;
+      if (err instanceof Error) {
+        if (err.message?.includes('function') || err.message?.includes('does not exist')) {
+          errorMessage += 'The create_game function is missing. Please run the SQL migration in Supabase.';
+        } else if (err.message?.includes('permission') || err.message?.includes('policy')) {
+          errorMessage += 'Permission denied. Check your database policies.';
+        } else {
+          errorMessage += err.message;
+        }
+      } else if (err && typeof err === 'object' && 'code' in err) {
+        errorMessage += `Error code: ${(err as { code: string }).code}`;
       } else {
         errorMessage += 'Unknown error occurred. Check the console for details.';
       }
@@ -367,11 +377,16 @@ export default function Admin() {
     setIsLoading(true);
     try {
       // Fetch resumes with ratings for selected game
-      const { data: resumes, error: resumeError } = await supabase
+      // Using type assertion to avoid deep type instantiation
+      const resumesQuery = supabase
         .from('resumes')
         .select('*')
-        .eq('game_id', selectedGameId)
+        .eq('game_id' as never, selectedGameId)
         .order('created_at', { ascending: false });
+      const { data: resumes, error: resumeError } = await resumesQuery as unknown as { 
+        data: Resume[] | null; 
+        error: Error | null 
+      };
 
       if (resumeError) throw resumeError;
 
@@ -411,11 +426,16 @@ export default function Admin() {
     
     try {
       // Get unique graders who have participated in this game
-      const { data: comps } = await supabase
+      // Using type assertion to avoid deep type instantiation
+      const compsQuery = supabase
         .from('comparisons')
         .select('user_id')
-        .eq('game_id', selectedGameId)
+        .eq('game_id' as never, selectedGameId)
         .limit(1000);
+      const { data: comps } = await compsQuery as unknown as { 
+        data: Array<{ user_id: string }> | null; 
+        error: Error | null 
+      };
 
       if (!comps || comps.length === 0) {
         setGraders([]);
@@ -424,11 +444,16 @@ export default function Admin() {
 
       const uniqueUserIds = [...new Set(comps.map(c => c.user_id))];
       
-      const { data: profiles, error } = await supabase
+      // Using type assertion because 'first_name' and 'last_name' columns exist but may not be in generated types
+      const profilesQuery = supabase
         .from('profiles')
         .select('id, role, created_at, first_name, last_name')
         .in('id', uniqueUserIds)
         .order('created_at', { ascending: false });
+      const { data: profiles, error } = await profilesQuery as unknown as { 
+        data: Profile[] | null; 
+        error: Error | null 
+      };
 
       if (error) throw error;
       setGraders(profiles || []);
@@ -442,13 +467,18 @@ export default function Admin() {
     
     setIsLoadingComparisons(true);
     try {
-      const { data: comps, error } = await supabase
+      // Using type assertion to avoid deep type instantiation
+      const compsQuery = supabase
         .from('comparisons')
         .select('*')
         .eq('user_id', graderId)
-        .eq('game_id', selectedGameId)
+        .eq('game_id' as never, selectedGameId)
         .order('created_at', { ascending: false })
         .limit(100);
+      const { data: comps, error } = await compsQuery as unknown as { 
+        data: Comparison[] | null; 
+        error: Error | null 
+      };
 
       if (error) throw error;
 
@@ -460,19 +490,29 @@ export default function Admin() {
         resumeIds.add(c.winner_id);
       });
 
-      const { data: resumes } = await supabase
+      // Using type assertion to avoid deep type instantiation
+      const resumesQuery = supabase
         .from('resumes')
         .select('id, name')
-        .in('id', Array.from(resumeIds));
+        .in('id' as never, Array.from(resumeIds));
+      const { data: resumes } = await resumesQuery as unknown as { 
+        data: Array<{ id: string; name: string }> | null; 
+        error: Error | null 
+      };
 
       const resumeMap = new Map(resumes?.map(r => [r.id, r.name]) || []);
 
       // Get user profile with name
-      const { data: profile } = await supabase
+      // Using type assertion because 'first_name' and 'last_name' columns exist but may not be in generated types
+      const profileQuery = supabase
         .from('profiles')
         .select('first_name, last_name')
         .eq('id', graderId)
         .single();
+      const { data: profile } = await profileQuery as unknown as { 
+        data: { first_name?: string; last_name?: string } | null; 
+        error: Error | null 
+      };
 
       const enriched = (comps || []).map(c => ({
         ...c,
@@ -498,21 +538,31 @@ export default function Admin() {
     setIsLoadingApplications(true);
     try {
       // Fetch applications with video grade stats
-      const { data: apps, error: appsError } = await supabase
-        .from('applications')
+      // Using type assertion because 'applications' table exists but may not be in generated types
+      const appsQuery = supabase
+        .from('applications' as never)
         .select('*')
         .eq('game_id', selectedGameId)
         .order('submitted_at', { ascending: false });
+      const { data: apps, error: appsError } = await appsQuery as unknown as { 
+        data: Application[] | null; 
+        error: Error | null 
+      };
 
       if (appsError) throw appsError;
 
       // Get video grade stats for each application
       if (apps && apps.length > 0) {
         const applicationIds = apps.map(a => a.id);
-        const { data: grades, error: gradesError } = await supabase
-          .from('video_grades')
+        // Using type assertion because 'video_grades' table exists but may not be in generated types
+        const gradesQuery = supabase
+          .from('video_grades' as never)
           .select('application_id, total_score')
           .in('application_id', applicationIds);
+        const { data: grades, error: gradesError } = await gradesQuery as unknown as { 
+          data: Array<{ application_id: string; total_score: number }> | null; 
+          error: Error | null 
+        };
 
         if (!gradesError && grades) {
           // Calculate average scores per application
@@ -557,9 +607,14 @@ export default function Admin() {
 
     setIsLoadingFinalRankings(true);
     try {
-      const { data, error } = await supabase.rpc('get_combined_rankings', {
+      // Using type assertion because 'get_combined_rankings' function exists but may not be in generated types
+      const rpcCall = supabase.rpc('get_combined_rankings' as never, {
         p_game_id: selectedGameId,
-      });
+      } as never);
+      const { data, error } = await rpcCall as unknown as { 
+        data: FinalRanking[] | null; 
+        error: Error | null 
+      };
 
       if (error) throw error;
 
