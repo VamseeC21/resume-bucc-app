@@ -51,11 +51,12 @@ export default function Apply() {
     setIsLoadingPeriod(true);
     try {
       // Get the most recent game (default application period)
-      const { data, error } = await supabase
-        .from('games')
-        .select('id, name')
-        .order('created_at', { ascending: false })
-        .limit(1);
+      // Using type assertion because 'games' table exists but may not be in generated types
+      const query = supabase.from('games' as never).select('id, name').order('created_at', { ascending: false }).limit(1);
+      const { data, error } = await query as { 
+        data: Array<{ id: string; name: string }> | null; 
+        error: Error | null 
+      };
 
       if (error) throw error;
 
@@ -65,9 +66,10 @@ export default function Apply() {
         toast.error('No application period is currently available. Please contact the administrator.');
         setPeriodName(null);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error loading default period:', err);
-      toast.error('Failed to load application period. Please try again later.');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load application period. Please try again later.';
+      toast.error(errorMessage);
       setPeriodName(null);
     } finally {
       setIsLoadingPeriod(false);
@@ -195,7 +197,8 @@ export default function Apply() {
       }
 
       // Submit application via RPC (access token is optional, will use default if not provided)
-      const { data, error } = await supabase.rpc('submit_application', {
+      // Using type assertion because 'submit_application' function exists but may not be in generated types
+      const rpcParams = {
         p_applicant_first_name: formData.applicant_first_name.trim(),
         p_applicant_last_name: formData.applicant_last_name.trim() || null,
         p_applicant_email: formData.applicant_email.trim().toLowerCase(),
@@ -217,7 +220,12 @@ export default function Apply() {
         p_video_question_2_choice: formData.video_question_2_choice,
         p_additional_info: formData.additional_info.trim() || null,
         // p_access_token is optional and at the end - will use default period if not provided
-      });
+      };
+      const rpcResult = await supabase.rpc('submit_application' as never, rpcParams as never);
+      const { data, error } = rpcResult as unknown as { 
+        data: { error?: string; success?: boolean } | null; 
+        error: Error | null 
+      };
 
       if (error) {
         throw error;
@@ -230,9 +238,10 @@ export default function Apply() {
 
       setIsSubmitted(true);
       toast.success('Application submitted successfully!');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error submitting application:', err);
-      toast.error(err.message || 'Failed to submit application. Please try again.');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to submit application. Please try again.';
+      toast.error(errorMessage);
     } finally {
       setIsSubmitting(false);
     }
