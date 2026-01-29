@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -6,10 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Loader2, LogOut, Settings, Trophy, Video, User, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Loader2, LogOut, Settings, Trophy, Video, User, CheckCircle2, AlertCircle, Search } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Application {
@@ -114,11 +115,25 @@ export default function GradeVideos() {
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Search by name
+  const [nameSearch, setNameSearch] = useState('');
+
   // Grading form state
   const [question1Score, setQuestion1Score] = useState<string>('');
   const [question2Score, setQuestion2Score] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
   const [profilePictureUrl, setProfilePictureUrl] = useState<string | null>(null);
+
+  // Filter applications by name (and email) for search
+  const filteredApplications = useMemo(() => {
+    const q = nameSearch.trim().toLowerCase();
+    if (!q) return applications;
+    return applications.filter((app) => {
+      const fullName = getFullName(app).toLowerCase();
+      const email = (app.applicant_email || '').toLowerCase();
+      return fullName.includes(q) || email.includes(q);
+    });
+  }, [applications, nameSearch]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -511,71 +526,98 @@ export default function GradeVideos() {
             {/* Applications List */}
             <Card className="glass-panel">
               <CardHeader>
-                <CardTitle>Applications</CardTitle>
-                <CardDescription>
-                  Click on an application to grade it. Each video needs 3 grades to be marked complete. 
-                  Applications you haven't graded are shown first.
-                </CardDescription>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div>
+                    <CardTitle>Applications</CardTitle>
+                    <CardDescription>
+                      Click on an application to grade it. Each video needs 3 grades to be marked complete. 
+                      Applications you haven't graded are shown first.
+                    </CardDescription>
+                  </div>
+                  <div className="relative w-full sm:w-64 shrink-0">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                    <Input
+                      type="search"
+                      placeholder="Search by name or email..."
+                      value={nameSearch}
+                      onChange={(e) => setNameSearch(e.target.value)}
+                      className="pl-9"
+                      aria-label="Search applications by name or email"
+                    />
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  {applications.map((app) => (
-                    <div
-                      key={app.id}
-                      className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer"
-                      onClick={() => handleOpenApplication(app)}
-                    >
-                      <div className="flex items-center gap-4">
-                        {app.profile_picture_path ? (
-                          <ProfilePictureDisplay path={app.profile_picture_path} />
-                        ) : (
-                          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
-                            <User className="w-6 h-6 text-primary" />
-                          </div>
-                        )}
-                        <div>
-                          <h3 className="font-semibold">{getFullName(app)}</h3>
-                          <p className="text-sm text-muted-foreground">
-                            {app.year} • {app.major}
-                          </p>
-                          <p className="text-xs text-muted-foreground">{app.applicant_email}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {/* Grade Count and Status Indicator */}
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-muted-foreground">
-                            Grades: {app.grade_count ?? 0}/3
-                          </span>
-                          {app.grade_count !== undefined && app.grade_count >= 3 ? (
-                            <Badge variant="outline" className="text-green-600 border-green-600 bg-green-50">
-                              <CheckCircle2 className="w-3 h-3 mr-1" />
-                              Complete
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-amber-600 border-amber-600 bg-amber-50">
-                              <AlertCircle className="w-3 h-3 mr-1" />
-                              Pending
-                            </Badge>
-                          )}
-                        </div>
-                        {/* Personal Grading Status */}
-                        {app.is_graded_by_me ? (
-                          <Badge variant="outline" className="text-blue-600 border-blue-600">
-                            <CheckCircle2 className="w-3 h-3 mr-1" />
-                            Graded by You
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-muted-foreground border-muted">
-                            Pending
-                          </Badge>
-                        )}
-                        <Button variant="ghost" size="sm">
-                          Grade
-                        </Button>
-                      </div>
+                  {filteredApplications.length === 0 ? (
+                    <div className="py-8 text-center text-muted-foreground">
+                      {nameSearch.trim() ? (
+                        <>No applications match &quot;{nameSearch.trim()}&quot;. Try a different search.</>
+                      ) : (
+                        'No applications to display.'
+                      )}
                     </div>
-                  ))}
+                  ) : (
+                    <>
+                      {filteredApplications.map((app) => (
+                        <div
+                          key={app.id}
+                          className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer"
+                          onClick={() => handleOpenApplication(app)}
+                        >
+                          <div className="flex items-center gap-4">
+                            {app.profile_picture_path ? (
+                              <ProfilePictureDisplay path={app.profile_picture_path} />
+                            ) : (
+                              <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+                                <User className="w-6 h-6 text-primary" />
+                              </div>
+                            )}
+                            <div>
+                              <h3 className="font-semibold">{getFullName(app)}</h3>
+                              <p className="text-sm text-muted-foreground">
+                                {app.year} • {app.major}
+                              </p>
+                              <p className="text-xs text-muted-foreground">{app.applicant_email}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            {/* Grade Count and Status Indicator */}
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm text-muted-foreground">
+                                Grades: {app.grade_count ?? 0}/3
+                              </span>
+                              {app.grade_count !== undefined && app.grade_count >= 3 ? (
+                                <Badge variant="outline" className="text-green-600 border-green-600 bg-green-50">
+                                  <CheckCircle2 className="w-3 h-3 mr-1" />
+                                  Complete
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-amber-600 border-amber-600 bg-amber-50">
+                                  <AlertCircle className="w-3 h-3 mr-1" />
+                                  Pending
+                                </Badge>
+                              )}
+                            </div>
+                            {/* Personal Grading Status */}
+                            {app.is_graded_by_me ? (
+                              <Badge variant="outline" className="text-blue-600 border-blue-600">
+                                <CheckCircle2 className="w-3 h-3 mr-1" />
+                                Graded by You
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-muted-foreground border-muted">
+                                Pending
+                              </Badge>
+                            )}
+                            <Button variant="ghost" size="sm">
+                              Grade
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  )}
                 </div>
               </CardContent>
             </Card>
