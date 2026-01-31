@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { 
   Loader2, Upload, Trophy, Users, FileText, ArrowLeft, Search,
   ChevronUp, ChevronDown, Edit2, Check, X, Gamepad2, Plus, Copy, Eye, Video, User, Award, Download
@@ -70,6 +71,13 @@ interface Game {
   created_at: string;
 }
 
+interface VideoGradeDetail {
+  grader_name: string;
+  question_1_score: number;
+  question_2_score: number;
+  total_score: number;
+}
+
 interface Application {
   id: string;
   applicant_name: string; // Keep for backward compatibility
@@ -87,6 +95,7 @@ interface Application {
   resume_id?: string;
   average_video_score?: number;
   video_grade_count?: number;
+  video_grade_details?: VideoGradeDetail[];
 }
 
 interface FinalRanking {
@@ -201,6 +210,7 @@ export default function Admin() {
   const [videoGradesAudit, setVideoGradesAudit] = useState<VideoGradeAuditRow[]>([]);
   const [isLoadingVideoGradesAudit, setIsLoadingVideoGradesAudit] = useState(false);
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
+  const [expandedVideoScoreAppId, setExpandedVideoScoreAppId] = useState<string | null>(null);
   
   // Edit state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -626,45 +636,65 @@ export default function Admin() {
 
       if (appsError) throw appsError;
 
-      // Get video grade stats for each application
+      // Get video grade stats and per-grader details for each application
       if (apps && apps.length > 0) {
         const applicationIds = apps.map(a => a.id);
-        // Using type assertion because 'video_grades' table exists but may not be in generated types
+        type GradeRow = { application_id: string; grader_id: string; question_1_score: number; question_2_score: number; total_score: number };
         const gradesQuery = supabase
           .from('video_grades' as never)
-          .select('application_id, total_score')
+          .select('application_id, grader_id, question_1_score, question_2_score, total_score')
           .in('application_id', applicationIds);
-        const { data: grades, error: gradesError } = await gradesQuery as unknown as { 
-          data: Array<{ application_id: string; total_score: number }> | null; 
-          error: Error | null 
+        const { data: grades, error: gradesError } = await gradesQuery as unknown as {
+          data: GradeRow[] | null;
+          error: Error | null;
         };
 
         if (!gradesError && grades) {
-          // Calculate average scores per application
-          const gradeMap = new Map<string, number[]>();
+          const graderIds = [...new Set(grades.map(g => g.grader_id))];
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, first_name, last_name')
+            .in('id', graderIds) as unknown as { data: Array<{ id: string; first_name?: string; last_name?: string }> | null };
+          const graderNameMap = new Map<string, string>();
+          (profiles || []).forEach(p => {
+            const name = p.first_name && p.last_name ? `${p.first_name} ${p.last_name}`.trim() : p.first_name || p.last_name || p.id.slice(0, 8) + '...';
+            graderNameMap.set(p.id, name);
+          });
+
+          const detailsMap = new Map<string, VideoGradeDetail[]>();
           grades.forEach(g => {
-            if (!gradeMap.has(g.application_id)) {
-              gradeMap.set(g.application_id, []);
-            }
-            gradeMap.get(g.application_id)!.push(g.total_score);
+            const name = graderNameMap.get(g.grader_id) || 'Unknown';
+            const detail: VideoGradeDetail = {
+              grader_name: name,
+              question_1_score: g.question_1_score,
+              question_2_score: g.question_2_score,
+              total_score: g.total_score,
+            };
+            if (!detailsMap.has(g.application_id)) detailsMap.set(g.application_id, []);
+            detailsMap.get(g.application_id)!.push(detail);
+          });
+
+          const gradeCountMap = new Map<string, number[]>();
+          grades.forEach(g => {
+            if (!gradeCountMap.has(g.application_id)) gradeCountMap.set(g.application_id, []);
+            gradeCountMap.get(g.application_id)!.push(g.total_score);
           });
 
           const enriched = apps.map(app => {
-            const scores = gradeMap.get(app.id) || [];
-            const avgScore = scores.length > 0
-              ? scores.reduce((a, b) => a + b, 0) / scores.length
-              : null;
-            
+            const scores = gradeCountMap.get(app.id) || [];
+            const avgScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+            const video_grade_details = detailsMap.get(app.id) || [];
             return {
               ...app,
               average_video_score: avgScore,
               video_grade_count: scores.length,
+              video_grade_details,
             };
           });
 
           setApplications(enriched);
         } else {
-          setApplications(apps.map(app => ({ ...app, average_video_score: null, video_grade_count: 0 })));
+          setApplications(apps.map(app => ({ ...app, average_video_score: null, video_grade_count: 0, video_grade_details: [] })));
         }
       } else {
         setApplications([]);
@@ -1682,12 +1712,37 @@ export default function Admin() {
                                           </Badge>
                                         )}
                                       </div>
-                                      {app.average_video_score !== null && (
+                                      {app.average_video_score !== null && app.video_grade_count !== undefined && app.video_grade_count > 0 && (
                                         <div className="mt-2">
-                                          <Badge variant="default" className="bg-green-600">
-                                            Avg Video Score: {app.average_video_score.toFixed(1)}/10
-                                            ({app.video_grade_count} {app.video_grade_count === 1 ? 'grade' : 'grades'})
-                                          </Badge>
+                                          <Collapsible
+                                            open={expandedVideoScoreAppId === app.id}
+                                            onOpenChange={(open) => setExpandedVideoScoreAppId(open ? app.id : null)}
+                                          >
+                                            <CollapsibleTrigger asChild>
+                                              <button
+                                                type="button"
+                                                className="inline-flex items-center gap-1.5 rounded-md border-0 bg-green-600 px-2.5 py-0.5 text-xs font-semibold text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+                                              >
+                                                Avg Video Score: {app.average_video_score.toFixed(1)}/10
+                                                ({app.video_grade_count} {app.video_grade_count === 1 ? 'grade' : 'grades'})
+                                                <ChevronDown
+                                                  className={`h-3 w-3 opacity-80 transition-transform ${expandedVideoScoreAppId === app.id ? 'rotate-180' : ''}`}
+                                                />
+                                              </button>
+                                            </CollapsibleTrigger>
+                                            <CollapsibleContent>
+                                              <div className="mt-2 rounded-md border bg-muted/30 p-2 space-y-1.5 text-xs">
+                                                {app.video_grade_details?.map((d, i) => (
+                                                  <div key={i} className="flex justify-between items-center gap-2">
+                                                    <span className="font-medium text-foreground">{d.grader_name}</span>
+                                                    <span className="text-muted-foreground tabular-nums">
+                                                      Q1: {d.question_1_score}, Q2: {d.question_2_score} — {d.total_score}/10
+                                                    </span>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </CollapsibleContent>
+                                          </Collapsible>
                                         </div>
                                       )}
                                       {app.video_grade_count === 0 && (
