@@ -25,6 +25,7 @@ const App = () => (
             <Route path="/" element={<Navigate to="/apply" replace />} />
             <Route path="/auth" element={<Auth />} />
             <Route path="/apply" element={<Apply />} />
+            <Route path="/apply/form" element={<Apply />} />
             <Route path="/select-game" element={<SelectGame />} />
             <Route path="/grade" element={<Grade />} />
             <Route path="/grade-videos" element={<GradeVideos />} />
