@@ -42,6 +42,18 @@ interface Comparison {
   user_last_name?: string;
 }
 
+interface VideoGradeAuditRow {
+  id: string;
+  application_id: string;
+  question_1_score: number;
+  question_2_choice: string | null;
+  question_2_score: number;
+  notes: string | null;
+  graded_at: string;
+  total_score?: number;
+  applicant_name?: string;
+}
+
 interface Profile {
   id: string;
   role: string;
@@ -185,6 +197,10 @@ export default function Admin() {
   const [selectedGrader, setSelectedGrader] = useState<string>('');
   const [comparisons, setComparisons] = useState<Comparison[]>([]);
   const [isLoadingComparisons, setIsLoadingComparisons] = useState(false);
+  const [auditVoteSubTab, setAuditVoteSubTab] = useState<'comparisons' | 'video-grades'>('comparisons');
+  const [videoGradesAudit, setVideoGradesAudit] = useState<VideoGradeAuditRow[]>([]);
+  const [isLoadingVideoGradesAudit, setIsLoadingVideoGradesAudit] = useState(false);
+  const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
   
   // Edit state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -532,6 +548,56 @@ export default function Admin() {
     }
   }, [selectedGameId]);
 
+  const fetchVideoGradesAudit = useCallback(async (graderId: string) => {
+    if (!selectedGameId) return;
+
+    setIsLoadingVideoGradesAudit(true);
+    try {
+      type VideoGradeRow = {
+        id: string;
+        application_id: string;
+        question_1_score: number;
+        question_2_choice: string | null;
+        question_2_score: number;
+        notes: string | null;
+        graded_at: string;
+        total_score?: number;
+        applications?: { applicant_name?: string } | null;
+      };
+      const { data: rows, error } = await supabase
+        .from('video_grades' as never)
+        .select('id, application_id, question_1_score, question_2_choice, question_2_score, notes, graded_at, total_score, applications(applicant_name)')
+        .eq('grader_id', graderId)
+        .eq('game_id', selectedGameId)
+        .order('graded_at', { ascending: false }) as { data: VideoGradeRow[] | null; error: Error | null };
+
+      if (error) throw error;
+
+      const mapped: VideoGradeAuditRow[] = (rows || []).map((r) => {
+        const app = r.applications;
+        const name = (app?.applicant_name ?? '').trim() || 'Unknown';
+        return {
+          id: r.id,
+          application_id: r.application_id,
+          question_1_score: r.question_1_score,
+          question_2_choice: r.question_2_choice,
+          question_2_score: r.question_2_score,
+          notes: r.notes,
+          graded_at: r.graded_at,
+          total_score: r.total_score,
+          applicant_name: name,
+        };
+      });
+      setVideoGradesAudit(mapped);
+    } catch (err) {
+      console.error('Error fetching video grades for audit:', err);
+      toast.error('Failed to load video grades');
+      setVideoGradesAudit([]);
+    } finally {
+      setIsLoadingVideoGradesAudit(false);
+    }
+  }, [selectedGameId]);
+
   const fetchApplications = useCallback(async () => {
     if (!selectedGameId) return;
 
@@ -644,12 +710,15 @@ export default function Admin() {
   }, [user, isAdmin, selectedGameId, activeTab]);
 
   useEffect(() => {
+    setExpandedNoteId(null);
     if (selectedGrader) {
       fetchComparisons(selectedGrader);
+      fetchVideoGradesAudit(selectedGrader);
     } else {
       setComparisons([]);
+      setVideoGradesAudit([]);
     }
-  }, [selectedGrader, fetchComparisons]);
+  }, [selectedGrader, fetchComparisons, fetchVideoGradesAudit]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -1346,89 +1415,177 @@ export default function Admin() {
                   </div>
                   {selectedGrader && (
                     <Badge variant="secondary" className="shrink-0 gap-1.5 px-3 py-1.5 text-base font-semibold">
-                      <span className="tabular-nums text-primary">{comparisons.length}</span>
-                      <span className="font-normal text-muted-foreground">votes</span>
+                      <span className="tabular-nums text-primary">
+                        {auditVoteSubTab === 'comparisons' ? comparisons.length : videoGradesAudit.length}
+                      </span>
+                      <span className="font-normal text-muted-foreground">
+                        {auditVoteSubTab === 'comparisons' ? 'votes' : 'grades'}
+                      </span>
                     </Badge>
                   )}
                 </CardHeader>
                 <CardContent>
-                  {isLoadingComparisons ? (
-                    <div className="flex items-center justify-center py-12">
-                      <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                    </div>
-                  ) : selectedGrader ? (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Date</TableHead>
-                          <TableHead>Resume A</TableHead>
-                          <TableHead>Resume B</TableHead>
-                          <TableHead>Winner</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {comparisons.map(comp => {
-                          const handleResumeClick = async (resumeId: string) => {
-                            const { data } = await supabase
-                              .from('resumes')
-                              .select('*')
-                              .eq('id', resumeId)
-                              .single();
-                            if (data) {
-                              handlePreviewResume(data as Resume);
-                            }
-                          };
-                          
-                          return (
-                            <TableRow key={comp.id}>
-                              <TableCell className="text-muted-foreground">
-                                {new Date(comp.created_at).toLocaleString()}
-                              </TableCell>
-                              <TableCell>
-                                <button
-                                  onClick={() => handleResumeClick(comp.resume_a_id)}
-                                  className="text-primary hover:underline flex items-center gap-1 cursor-pointer"
-                                >
-                                  <Eye className="w-3 h-3" />
-                                  {comp.resume_a_name}
-                                </button>
-                              </TableCell>
-                              <TableCell>
-                                <button
-                                  onClick={() => handleResumeClick(comp.resume_b_id)}
-                                  className="text-primary hover:underline flex items-center gap-1 cursor-pointer"
-                                >
-                                  <Eye className="w-3 h-3" />
-                                  {comp.resume_b_name}
-                                </button>
-                              </TableCell>
-                              <TableCell>
-                                <button
-                                  onClick={() => handleResumeClick(comp.winner_id)}
-                                  className="flex items-center gap-1 cursor-pointer"
-                                >
-                                  <Badge variant="default" className="bg-success hover:bg-success/80">
-                                    <Eye className="w-3 h-3 mr-1" />
-                                    {comp.winner_name}
-                                  </Badge>
-                                </button>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                        {comparisons.length === 0 && (
-                          <TableRow>
-                            <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
-                              No votes recorded for this grader
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  ) : (
+                  {!selectedGrader ? (
                     <div className="text-center py-12 text-muted-foreground">
                       Select a grader from the list to view their vote history
                     </div>
+                  ) : (
+                    <Tabs value={auditVoteSubTab} onValueChange={(v) => setAuditVoteSubTab(v as 'comparisons' | 'video-grades')}>
+                      <TabsList className="grid w-full grid-cols-2 max-w-xs mb-4">
+                        <TabsTrigger value="comparisons" className="flex items-center gap-2">
+                          <Trophy className="w-4 h-4" />
+                          Comparison votes
+                        </TabsTrigger>
+                        <TabsTrigger value="video-grades" className="flex items-center gap-2">
+                          <Video className="w-4 h-4" />
+                          Video grades
+                        </TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="comparisons" className="mt-0">
+                        {isLoadingComparisons ? (
+                          <div className="flex items-center justify-center py-12">
+                            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                          </div>
+                        ) : (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Date</TableHead>
+                                <TableHead>Resume A</TableHead>
+                                <TableHead>Resume B</TableHead>
+                                <TableHead>Winner</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {comparisons.map(comp => {
+                                const handleResumeClick = async (resumeId: string) => {
+                                  const { data } = await supabase
+                                    .from('resumes')
+                                    .select('*')
+                                    .eq('id', resumeId)
+                                    .single();
+                                  if (data) {
+                                    handlePreviewResume(data as Resume);
+                                  }
+                                };
+
+                                return (
+                                  <TableRow key={comp.id}>
+                                    <TableCell className="text-muted-foreground">
+                                      {new Date(comp.created_at).toLocaleString()}
+                                    </TableCell>
+                                    <TableCell>
+                                      <button
+                                        onClick={() => handleResumeClick(comp.resume_a_id)}
+                                        className="text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                                      >
+                                        <Eye className="w-3 h-3" />
+                                        {comp.resume_a_name}
+                                      </button>
+                                    </TableCell>
+                                    <TableCell>
+                                      <button
+                                        onClick={() => handleResumeClick(comp.resume_b_id)}
+                                        className="text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                                      >
+                                        <Eye className="w-3 h-3" />
+                                        {comp.resume_b_name}
+                                      </button>
+                                    </TableCell>
+                                    <TableCell>
+                                      <button
+                                        onClick={() => handleResumeClick(comp.winner_id)}
+                                        className="flex items-center gap-1 cursor-pointer"
+                                      >
+                                        <Badge variant="default" className="bg-success hover:bg-success/80">
+                                          <Eye className="w-3 h-3 mr-1" />
+                                          {comp.winner_name}
+                                        </Badge>
+                                      </button>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                              {comparisons.length === 0 && (
+                                <TableRow>
+                                  <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                                    No comparison votes for this grader
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                            </TableBody>
+                          </Table>
+                        )}
+                      </TabsContent>
+                      <TabsContent value="video-grades" className="mt-0">
+                        {isLoadingVideoGradesAudit ? (
+                          <div className="flex items-center justify-center py-12">
+                            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                          </div>
+                        ) : (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Date</TableHead>
+                                <TableHead>Applicant</TableHead>
+                                <TableHead>Q1</TableHead>
+                                <TableHead>Q2</TableHead>
+                                <TableHead>Total</TableHead>
+                                <TableHead>Notes</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {videoGradesAudit.map((row) => {
+                                const hasNotes = row.notes && row.notes.trim().length > 0;
+                                const isLong = hasNotes && row.notes!.length > 80;
+                                const isExpanded = expandedNoteId === row.id;
+                                const showFull = !isLong || isExpanded;
+                                return (
+                                  <TableRow key={row.id}>
+                                    <TableCell className="text-muted-foreground">
+                                      {new Date(row.graded_at).toLocaleString()}
+                                    </TableCell>
+                                    <TableCell className="font-medium">{row.applicant_name ?? '—'}</TableCell>
+                                    <TableCell>{row.question_1_score}</TableCell>
+                                    <TableCell>{row.question_2_score}</TableCell>
+                                    <TableCell>{row.total_score ?? row.question_1_score + row.question_2_score}</TableCell>
+                                    <TableCell className="max-w-[280px] text-muted-foreground align-top">
+                                      {!hasNotes ? (
+                                        '—'
+                                      ) : (
+                                        <div className="space-y-1">
+                                          <span className={showFull ? 'whitespace-pre-wrap break-words' : 'line-clamp-2'}>
+                                            {showFull ? row.notes : row.notes!.slice(0, 80) + (row.notes!.length > 80 ? '...' : '')}
+                                          </span>
+                                          {isLong && (
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              size="sm"
+                                              className="h-7 text-xs text-primary px-0 hover:bg-transparent"
+                                              onClick={() => setExpandedNoteId(isExpanded ? null : row.id)}
+                                            >
+                                              {isExpanded ? 'Show less' : 'Show more'}
+                                            </Button>
+                                          )}
+                                        </div>
+                                      )}
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                              {videoGradesAudit.length === 0 && (
+                                <TableRow>
+                                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                                    No video grades for this grader
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                            </TableBody>
+                          </Table>
+                        )}
+                      </TabsContent>
+                    </Tabs>
                   )}
                 </CardContent>
               </Card>
