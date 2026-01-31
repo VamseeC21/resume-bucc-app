@@ -1328,20 +1328,28 @@ export default function Admin() {
                 </Card>
 
               <Card className="glass-panel lg:col-span-2">
-                <CardHeader>
-                  <CardTitle>Vote History</CardTitle>
-                  <CardDescription>
-                    {selectedGrader 
-                      ? (() => {
-                          const grader = graders.find(g => g.id === selectedGrader);
-                          const graderName = grader?.first_name && grader?.last_name
-                            ? `${grader.first_name} ${grader.last_name}`
-                            : grader?.first_name || grader?.last_name || selectedGrader.slice(0, 8) + '...';
-                          return `Showing votes for ${graderName}`;
-                        })()
-                      : 'Select a grader to view their vote history'
-                    }
-                  </CardDescription>
+                <CardHeader className="flex flex-row items-start justify-between gap-4">
+                  <div>
+                    <CardTitle>Vote History</CardTitle>
+                    <CardDescription>
+                      {selectedGrader 
+                        ? (() => {
+                            const grader = graders.find(g => g.id === selectedGrader);
+                            const graderName = grader?.first_name && grader?.last_name
+                              ? `${grader.first_name} ${grader.last_name}`
+                              : grader?.first_name || grader?.last_name || selectedGrader.slice(0, 8) + '...';
+                            return `Showing votes for ${graderName}`;
+                          })()
+                        : 'Select a grader to view their vote history'
+                      }
+                    </CardDescription>
+                  </div>
+                  {selectedGrader && (
+                    <Badge variant="secondary" className="shrink-0 gap-1.5 px-3 py-1.5 text-base font-semibold">
+                      <span className="tabular-nums text-primary">{comparisons.length}</span>
+                      <span className="font-normal text-muted-foreground">votes</span>
+                    </Badge>
+                  )}
                 </CardHeader>
                 <CardContent>
                   {isLoadingComparisons ? (
