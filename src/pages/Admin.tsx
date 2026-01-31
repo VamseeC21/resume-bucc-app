@@ -439,36 +439,45 @@ export default function Admin() {
 
   const fetchGraders = useCallback(async () => {
     if (!selectedGameId) return;
-    
+
     try {
-      // Get unique graders who have participated in this game
-      // Using type assertion to avoid deep type instantiation
+      // 1) Grader user_ids from comparisons: this game OR legacy (game_id null) so we don't miss anyone
       const compsQuery = supabase
         .from('comparisons')
         .select('user_id')
-        .eq('game_id' as never, selectedGameId)
-        .limit(1000);
-      const { data: comps } = await compsQuery as unknown as { 
-        data: Array<{ user_id: string }> | null; 
-        error: Error | null 
+        .or(`game_id.eq.${selectedGameId},game_id.is.null` as never);
+      const { data: comps } = await compsQuery as unknown as {
+        data: Array<{ user_id: string }> | null;
+        error: Error | null;
       };
 
-      if (!comps || comps.length === 0) {
+      // 2) Grader ids from video_grades for this game
+      const gradesQuery = supabase
+        .from('video_grades' as never)
+        .select('grader_id')
+        .eq('game_id', selectedGameId);
+      const { data: grades } = await gradesQuery as unknown as {
+        data: Array<{ grader_id: string }> | null;
+        error: Error | null;
+      };
+
+      const fromComps = (comps || []).map((c) => c.user_id);
+      const fromGrades = (grades || []).map((g) => g.grader_id);
+      const uniqueUserIds = [...new Set([...fromComps, ...fromGrades])];
+
+      if (uniqueUserIds.length === 0) {
         setGraders([]);
         return;
       }
 
-      const uniqueUserIds = [...new Set(comps.map(c => c.user_id))];
-      
-      // Using type assertion because 'first_name' and 'last_name' columns exist but may not be in generated types
       const profilesQuery = supabase
         .from('profiles')
         .select('id, role, created_at, first_name, last_name')
         .in('id', uniqueUserIds)
         .order('created_at', { ascending: false });
-      const { data: profiles, error } = await profilesQuery as unknown as { 
-        data: Profile[] | null; 
-        error: Error | null 
+      const { data: profiles, error } = await profilesQuery as unknown as {
+        data: Profile[] | null;
+        error: Error | null;
       };
 
       if (error) throw error;
