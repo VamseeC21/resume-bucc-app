@@ -105,6 +105,7 @@ interface FinalRanking {
   applicant_email: string;
   year: string;
   major: string;
+  gender?: string;
   video_youtube_url: string;
   resume_id: string;
   resume_pdf_path: string;
@@ -906,6 +907,7 @@ export default function Admin() {
         'Email',
         'Year',
         'Major',
+        'Gender',
         'ELO Rating',
         'Video Avg Score',
         'ELO Normalized',
@@ -928,6 +930,7 @@ export default function Admin() {
             `"${ranking.applicant_email || ''}"`,
             `"${ranking.year || ''}"`,
             `"${ranking.major || ''}"`,
+            `"${ranking.gender || ''}"`,
             ranking.elo_rating?.toFixed(2) || '',
             ranking.video_avg_score?.toFixed(2) || '',
             ranking.elo_normalized?.toFixed(2) || '',
@@ -1868,6 +1871,7 @@ export default function Admin() {
                             <TableHead>Email</TableHead>
                             <TableHead>Year</TableHead>
                             <TableHead>Major</TableHead>
+                            <TableHead>Gender</TableHead>
                             <TableHead className="text-right">ELO Score</TableHead>
                             <TableHead className="text-right">Video Avg</TableHead>
                             <TableHead className="text-right font-bold">Combined Score</TableHead>
@@ -1889,6 +1893,7 @@ export default function Admin() {
                               <TableCell>{ranking.applicant_email}</TableCell>
                               <TableCell>{ranking.year}</TableCell>
                               <TableCell>{ranking.major || 'N/A'}</TableCell>
+                              <TableCell>{ranking.gender || '—'}</TableCell>
                               <TableCell className="text-right">
                                 {ranking.elo_rating?.toFixed(0)}
                               </TableCell>
