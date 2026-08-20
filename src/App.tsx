@@ -9,6 +9,7 @@ import SelectGame from "./pages/SelectGame";
 import Grade from "./pages/Grade";
 import Admin from "./pages/Admin";
 import Apply from "./pages/Apply";
+// import ApplicationClosed from "./pages/ApplicationClosed"; // swap in for <Apply /> below to close applications
 import GradeVideos from "./pages/GradeVideos";
 import Interview from "./pages/Interview";
 import NotFound from "./pages/NotFound";
@@ -25,8 +26,7 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Navigate to="/apply" replace />} />
             <Route path="/auth" element={<Auth />} />
-            <Route path="/apply" element={<Apply />} />
-            <Route path="/apply/form" element={<Apply />} />
+            <Route path="/apply" element={<Apply />} /* swap to <ApplicationClosed /> to close applications */ />
             <Route path="/select-game" element={<SelectGame />} />
             <Route path="/grade" element={<Grade />} />
             <Route path="/grade-videos" element={<GradeVideos />} />
