@@ -23,9 +23,14 @@ dist-ssr
 # Supabase
 .env.supabase
 
-# Ignore all SQL files EXCEPT migrations (keep supabase/migrations/*.sql)
+# Ignore all SQL files EXCEPT migrations and dev-seed scripts
 *.sql
 !supabase/migrations/*.sql
+!supabase/scripts/*.sql
+
+# Supabase CLI local state (machine-specific, not project config)
+supabase/.branches
+supabase/.temp
 
 # Editor directories and files
 .vscode/*

@@ -222,6 +222,14 @@ export default function Grade() {
               <Video className="w-4 h-4 mr-2" />
               Grade Videos
             </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/interview')}
+            >
+              Interview Scoring
+            </Button>
             
             {isAdmin && (
               <Button
