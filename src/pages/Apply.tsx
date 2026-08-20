@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,35 +6,10 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, CheckCircle2, AlertCircle, FileX2 } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
-/** Shown at /apply when applications are closed. The live form lives at /apply/form. */
-function ApplicationClosedView() {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="glass-panel max-w-md w-full">
-        <CardContent className="pt-6">
-          <div className="text-center">
-            <div className="inline-flex items-center justify-center mb-4">
-              <img src="/bucc-logo.png" alt="BUCC Logo" className="w-16 h-16 object-contain" />
-            </div>
-            <FileX2 className="w-14 h-14 mx-auto mb-4 text-muted-foreground" />
-            <h2 className="text-2xl font-bold mb-2">Application is closed</h2>
-            <p className="text-muted-foreground">
-              We are not currently accepting applications. Check back later for the next application period.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
 export default function Apply() {
-  const location = useLocation();
-  const isFormRoute = location.pathname === '/apply/form';
-
   const [periodName, setPeriodName] = useState<string | null>(null);
   const [isLoadingPeriod, setIsLoadingPeriod] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -67,9 +41,8 @@ export default function Apply() {
   const [profilePictureFile, setProfilePictureFile] = useState<File | null>(null);
 
   useEffect(() => {
-    if (!isFormRoute) return;
     loadDefaultPeriod();
-  }, [isFormRoute]);
+  }, []);
 
   const loadDefaultPeriod = async () => {
     setIsLoadingPeriod(true);
@@ -274,10 +247,6 @@ export default function Apply() {
       setIsSubmitting(false);
     }
   };
-
-  if (!isFormRoute) {
-    return <ApplicationClosedView />;
-  }
 
   if (isSubmitted) {
     return (
