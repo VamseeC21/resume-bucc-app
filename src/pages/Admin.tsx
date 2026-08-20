@@ -12,11 +12,12 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { 
+import {
   Loader2, Upload, Trophy, Users, FileText, ArrowLeft, Search,
-  ChevronUp, ChevronDown, Edit2, Check, X, Gamepad2, Plus, Copy, Eye, Video, User, Award, Download
+  ChevronUp, ChevronDown, Edit2, Check, X, Gamepad2, Plus, Copy, Eye, Video, User, Award, Download, Palette
 } from 'lucide-react';
 import { toast } from 'sonner';
+import DeliberationBoard from '@/components/DeliberationBoard';
 
 interface Resume {
   id: string;
@@ -254,12 +255,11 @@ export default function Admin() {
   const fetchGames = useCallback(async () => {
     if (!user) return;
     try {
-      // Using type assertion because 'games' table exists but may not be in generated types
-      const query = supabase.from('games' as never).select('*').eq('created_by', user.id).order('created_at', { ascending: false });
-      const { data, error } = await query as { 
-        data: Game[] | null; 
-        error: Error | null 
-      };
+      const { data, error } = await supabase
+        .from('games')
+        .select('*')
+        .eq('created_by', user.id)
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
       setGames(data || []);
@@ -298,16 +298,11 @@ export default function Admin() {
     
     try {
       console.log('Calling RPC create_game...');
-      // Using type assertion because 'create_game' function exists but may not be in generated types
-      const rpcCall = supabase.rpc('create_game' as never, {
+      const { data, error } = await supabase.rpc('create_game', {
         p_name: newGameName.trim(),
         p_created_by: user.id
-      } as never);
-      const { data, error } = await rpcCall as unknown as { 
-        data: { id: string; name: string; access_token: string; created_by: string; created_at: string } | null; 
-        error: Error | null 
-      };
-      
+      });
+
       clearTimeout(timeoutId);
 
       console.log('RPC Response:', { data, error });
@@ -404,16 +399,11 @@ export default function Admin() {
     setIsLoading(true);
     try {
       // Fetch resumes with ratings for selected game
-      // Using type assertion to avoid deep type instantiation
-      const resumesQuery = supabase
+      const { data: resumes, error: resumeError } = await supabase
         .from('resumes')
         .select('*')
-        .eq('game_id' as never, selectedGameId)
+        .eq('game_id', selectedGameId)
         .order('created_at', { ascending: false });
-      const { data: resumes, error: resumeError } = await resumesQuery as unknown as { 
-        data: Resume[] | null; 
-        error: Error | null 
-      };
 
       if (resumeError) throw resumeError;
 
@@ -452,25 +442,17 @@ export default function Admin() {
     if (!selectedGameId) return;
 
     try {
-      // 1) Grader user_ids from comparisons: this game OR legacy (game_id null) so we don't miss anyone
-      const compsQuery = supabase
+      // 1) Grader user_ids from comparisons in this game
+      const { data: comps } = await supabase
         .from('comparisons')
         .select('user_id')
-        .or(`game_id.eq.${selectedGameId},game_id.is.null` as never);
-      const { data: comps } = await compsQuery as unknown as {
-        data: Array<{ user_id: string }> | null;
-        error: Error | null;
-      };
+        .eq('game_id', selectedGameId);
 
       // 2) Grader ids from video_grades for this game
-      const gradesQuery = supabase
-        .from('video_grades' as never)
+      const { data: grades } = await supabase
+        .from('video_grades')
         .select('grader_id')
         .eq('game_id', selectedGameId);
-      const { data: grades } = await gradesQuery as unknown as {
-        data: Array<{ grader_id: string }> | null;
-        error: Error | null;
-      };
 
       const fromComps = (comps || []).map((c) => c.user_id);
       const fromGrades = (grades || []).map((g) => g.grader_id);
@@ -481,15 +463,11 @@ export default function Admin() {
         return;
       }
 
-      const profilesQuery = supabase
+      const { data: profiles, error } = await supabase
         .from('profiles')
         .select('id, role, created_at, first_name, last_name')
         .in('id', uniqueUserIds)
         .order('created_at', { ascending: false });
-      const { data: profiles, error } = await profilesQuery as unknown as {
-        data: Profile[] | null;
-        error: Error | null;
-      };
 
       if (error) throw error;
       setGraders(profiles || []);
@@ -503,18 +481,13 @@ export default function Admin() {
     
     setIsLoadingComparisons(true);
     try {
-      // Using type assertion to avoid deep type instantiation
-      const compsQuery = supabase
+      const { data: comps, error } = await supabase
         .from('comparisons')
         .select('*')
         .eq('user_id', graderId)
-        .eq('game_id' as never, selectedGameId)
+        .eq('game_id', selectedGameId)
         .order('created_at', { ascending: false })
         .limit(100);
-      const { data: comps, error } = await compsQuery as unknown as { 
-        data: Comparison[] | null; 
-        error: Error | null 
-      };
 
       if (error) throw error;
 
@@ -526,29 +499,19 @@ export default function Admin() {
         resumeIds.add(c.winner_id);
       });
 
-      // Using type assertion to avoid deep type instantiation
-      const resumesQuery = supabase
+      const { data: resumes } = await supabase
         .from('resumes')
         .select('id, name')
-        .in('id' as never, Array.from(resumeIds));
-      const { data: resumes } = await resumesQuery as unknown as { 
-        data: Array<{ id: string; name: string }> | null; 
-        error: Error | null 
-      };
+        .in('id', Array.from(resumeIds));
 
       const resumeMap = new Map(resumes?.map(r => [r.id, r.name]) || []);
 
       // Get user profile with name
-      // Using type assertion because 'first_name' and 'last_name' columns exist but may not be in generated types
-      const profileQuery = supabase
+      const { data: profile } = await supabase
         .from('profiles')
         .select('first_name, last_name')
         .eq('id', graderId)
         .single();
-      const { data: profile } = await profileQuery as unknown as { 
-        data: { first_name?: string; last_name?: string } | null; 
-        error: Error | null 
-      };
 
       const enriched = (comps || []).map(c => ({
         ...c,
@@ -573,23 +536,12 @@ export default function Admin() {
 
     setIsLoadingVideoGradesAudit(true);
     try {
-      type VideoGradeRow = {
-        id: string;
-        application_id: string;
-        question_1_score: number;
-        question_2_choice: string | null;
-        question_2_score: number;
-        notes: string | null;
-        graded_at: string;
-        total_score?: number;
-        applications?: { applicant_name?: string } | null;
-      };
       const { data: rows, error } = await supabase
-        .from('video_grades' as never)
+        .from('video_grades')
         .select('id, application_id, question_1_score, question_2_choice, question_2_score, notes, graded_at, total_score, applications(applicant_name)')
         .eq('grader_id', graderId)
         .eq('game_id', selectedGameId)
-        .order('graded_at', { ascending: false }) as { data: VideoGradeRow[] | null; error: Error | null };
+        .order('graded_at', { ascending: false });
 
       if (error) throw error;
 
@@ -624,38 +576,28 @@ export default function Admin() {
     setIsLoadingApplications(true);
     try {
       // Fetch applications with video grade stats
-      // Using type assertion because 'applications' table exists but may not be in generated types
-      const appsQuery = supabase
-        .from('applications' as never)
+      const { data: apps, error: appsError } = await supabase
+        .from('applications')
         .select('*')
         .eq('game_id', selectedGameId)
         .order('submitted_at', { ascending: false });
-      const { data: apps, error: appsError } = await appsQuery as unknown as { 
-        data: Application[] | null; 
-        error: Error | null 
-      };
 
       if (appsError) throw appsError;
 
       // Get video grade stats and per-grader details for each application
       if (apps && apps.length > 0) {
         const applicationIds = apps.map(a => a.id);
-        type GradeRow = { application_id: string; grader_id: string; question_1_score: number; question_2_score: number; total_score: number };
-        const gradesQuery = supabase
-          .from('video_grades' as never)
+        const { data: grades, error: gradesError } = await supabase
+          .from('video_grades')
           .select('application_id, grader_id, question_1_score, question_2_score, total_score')
           .in('application_id', applicationIds);
-        const { data: grades, error: gradesError } = await gradesQuery as unknown as {
-          data: GradeRow[] | null;
-          error: Error | null;
-        };
 
         if (!gradesError && grades) {
           const graderIds = [...new Set(grades.map(g => g.grader_id))];
           const { data: profiles } = await supabase
             .from('profiles')
             .select('id, first_name, last_name')
-            .in('id', graderIds) as unknown as { data: Array<{ id: string; first_name?: string; last_name?: string }> | null };
+            .in('id', graderIds);
           const graderNameMap = new Map<string, string>();
           (profiles || []).forEach(p => {
             const name = p.first_name && p.last_name ? `${p.first_name} ${p.last_name}`.trim() : p.first_name || p.last_name || p.id.slice(0, 8) + '...';
@@ -669,7 +611,7 @@ export default function Admin() {
               grader_name: name,
               question_1_score: g.question_1_score,
               question_2_score: g.question_2_score,
-              total_score: g.total_score,
+              total_score: g.total_score ?? g.question_1_score + g.question_2_score,
             };
             if (!detailsMap.has(g.application_id)) detailsMap.set(g.application_id, []);
             detailsMap.get(g.application_id)!.push(detail);
@@ -678,7 +620,7 @@ export default function Admin() {
           const gradeCountMap = new Map<string, number[]>();
           grades.forEach(g => {
             if (!gradeCountMap.has(g.application_id)) gradeCountMap.set(g.application_id, []);
-            gradeCountMap.get(g.application_id)!.push(g.total_score);
+            gradeCountMap.get(g.application_id)!.push(g.total_score ?? g.question_1_score + g.question_2_score);
           });
 
           const enriched = apps.map(app => {
@@ -713,14 +655,11 @@ export default function Admin() {
 
     setIsLoadingFinalRankings(true);
     try {
-      // Using type assertion because 'get_combined_rankings' function exists but may not be in generated types
-      const rpcCall = supabase.rpc('get_combined_rankings' as never, {
+      // get_combined_rankings returns a generic Json blob (json_agg), so a cast
+      // from the actual shape is still required here.
+      const { data, error } = await supabase.rpc('get_combined_rankings', {
         p_game_id: selectedGameId,
-      } as never);
-      const { data, error } = await rpcCall as unknown as { 
-        data: FinalRanking[] | null; 
-        error: Error | null 
-      };
+      });
 
       if (error) throw error;
 
@@ -1036,6 +975,10 @@ export default function Admin() {
             <TabsTrigger value="final-rankings" className="flex items-center gap-2">
               <Award className="w-4 h-4" />
               Final Rankings
+            </TabsTrigger>
+            <TabsTrigger value="deliberation" className="flex items-center gap-2">
+              <Palette className="w-4 h-4" />
+              Deliberation
             </TabsTrigger>
           </TabsList>
 
@@ -1931,6 +1874,28 @@ export default function Admin() {
                   )}
                 </CardContent>
               </Card>
+            )}
+          </TabsContent>
+
+          {/* Deliberation Tab */}
+          <TabsContent value="deliberation">
+            {!selectedGameId ? (
+              <Card className="glass-panel">
+                <CardContent className="py-12">
+                  <div className="text-center">
+                    <Palette className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                    <h3 className="text-lg font-semibold mb-2">No Application Period Selected</h3>
+                    <p className="text-muted-foreground mb-4">
+                      Please select or create an application period first to deliberate.
+                    </p>
+                    <Button onClick={() => setActiveTab('games')}>
+                      Go to Application Periods
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <DeliberationBoard gameId={selectedGameId} gameName={selectedGameName} />
             )}
           </TabsContent>
         </Tabs>

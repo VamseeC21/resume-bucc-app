@@ -10,6 +10,7 @@ import Grade from "./pages/Grade";
 import Admin from "./pages/Admin";
 import Apply from "./pages/Apply";
 import GradeVideos from "./pages/GradeVideos";
+import Interview from "./pages/Interview";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -29,6 +30,7 @@ const App = () => (
             <Route path="/select-game" element={<SelectGame />} />
             <Route path="/grade" element={<Grade />} />
             <Route path="/grade-videos" element={<GradeVideos />} />
+            <Route path="/interview" element={<Interview />} />
             <Route path="/admin" element={<Admin />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

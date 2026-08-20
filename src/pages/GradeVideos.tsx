@@ -215,7 +215,7 @@ export default function GradeVideos() {
       }
 
       // Handle case where function returns null (application not found)
-      if (data === null || (typeof data === 'object' && !data.id)) {
+      if (data === null || (typeof dataObj === 'object' && !dataObj.id)) {
         console.error('Application not found or invalid data:', data);
         throw new Error('Application not found');
       }
@@ -455,6 +455,10 @@ export default function GradeVideos() {
 
             <Button variant="outline" size="sm" onClick={() => navigate('/grade')}>
               Grade Resumes
+            </Button>
+
+            <Button variant="outline" size="sm" onClick={() => navigate('/interview')}>
+              Interview Scoring
             </Button>
 
             {isAdmin && (

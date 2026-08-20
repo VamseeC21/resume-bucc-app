@@ -74,13 +74,15 @@ export default function Apply() {
   const loadDefaultPeriod = async () => {
     setIsLoadingPeriod(true);
     try {
-      // Get the most recent game (default application period)
-      // Using type assertion because 'games' table exists but may not be in generated types
-      const query = supabase.from('games' as never).select('id, name').order('created_at', { ascending: false }).limit(1);
-      const { data, error } = await query as { 
-        data: Array<{ id: string; name: string }> | null; 
-        error: Error | null 
-      };
+      // Get the most recent game (default application period).
+      // TODO(Phase 1, cycle model): this should call the `get_default_application_game`
+      // RPC (already live in prod) instead of guessing by created_at, and should
+      // respect a cycle's open/closed status.
+      const { data, error } = await supabase
+        .from('games')
+        .select('id, name')
+        .order('created_at', { ascending: false })
+        .limit(1);
 
       if (error) throw error;
 
@@ -220,8 +222,13 @@ export default function Apply() {
         }
       }
 
-      // Submit application via RPC (access token is optional, will use default if not provided)
-      // Using type assertion because 'submit_application' function exists but may not be in generated types
+      // Submit application via RPC (access token is optional, will use default if not provided).
+      // NOTE: several of these fields are sent as `null` (e.g. gender = "prefer not to
+      // answer"), which Postgres accepts fine for a text RPC arg, but the generated
+      // type is stricter (`string`, not `string | null`) because information_schema
+      // doesn't expose function-arg nullability. Cast is scoped to this object only,
+      // not the function name, and should go away when submit_application is rewritten
+      // (see Phase 1 of the recruitment platform plan).
       const rpcParams = {
         p_applicant_first_name: formData.applicant_first_name.trim(),
         p_applicant_last_name: formData.applicant_last_name.trim() || null,
@@ -245,17 +252,14 @@ export default function Apply() {
         p_additional_info: formData.additional_info.trim() || null,
         // p_access_token is optional and at the end - will use default period if not provided
       };
-      const rpcResult = await supabase.rpc('submit_application' as never, rpcParams as never);
-      const { data, error } = rpcResult as unknown as { 
-        data: { error?: string; success?: boolean } | null; 
-        error: Error | null 
-      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- see NOTE above rpcParams
+      const { data, error } = await supabase.rpc('submit_application', rpcParams as any);
 
       if (error) {
         throw error;
       }
 
-      const result = data as unknown as { error?: string; success?: boolean };
+      const result = data as { error?: string; success?: boolean };
       if (result.error) {
         throw new Error(result.error);
       }
