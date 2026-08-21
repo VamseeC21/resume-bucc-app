@@ -12,7 +12,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { Loader2, LogOut, Settings, Trophy, Users, FileText, CheckCircle2, Search, ArrowLeft, Upload, Phone, BookOpen } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Loader2, LogOut, Settings, Trophy, Users, FileText, CheckCircle2, Search, ArrowLeft, Upload, Phone, BookOpen, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 
 type Round = 'R1' | 'R2';
@@ -32,6 +33,14 @@ type RoundConfig = {
 // interview guides. Update this config (not the schema) when the guide
 // changes next cycle -- section_scores/section_totals are flexible JSONB
 // specifically so that's a one-file edit, not a migration.
+const RECOMMENDATION_STYLE: Record<string, string> = {
+  yes: 'text-green-600 border-green-600',
+  juniors_yes: 'text-green-600 border-green-600',
+  maybe: 'text-amber-600 border-amber-600',
+  no: 'text-red-600 border-red-600',
+  juniors_no: 'text-red-600 border-red-600',
+};
+
 const ROUND_CONFIGS: Record<Round, RoundConfig> = {
   R1: {
     sections: [
@@ -340,6 +349,20 @@ interface Applicant {
   scored_by_me: boolean;
 }
 
+interface ExistingScore {
+  interviewer_id: string;
+  interviewer_name: string;
+  co_interviewer_name: string | null;
+  room_label: string | null;
+  section_totals: Record<string, number>;
+  total_score: number;
+  recommendation: string | null;
+  overall_impression: string | null;
+  availability: Record<string, boolean>;
+  candidate_phone: string | null;
+  glaring_concerns: string | null;
+}
+
 interface CandidateFormState {
   scores: Record<string, Record<string, number>>;
   variants: Record<string, string>;
@@ -388,6 +411,10 @@ export default function Interview() {
   const [coInterviewerName, setCoInterviewerName] = useState('');
   const [roomLabel, setRoomLabel] = useState('');
   const [forms, setForms] = useState<Record<string, CandidateFormState>>({});
+  const [isSubmittingAll, setIsSubmittingAll] = useState(false);
+  const [viewingApplicant, setViewingApplicant] = useState<Applicant | null>(null);
+  const [viewingScores, setViewingScores] = useState<ExistingScore[] | null>(null);
+  const [isLoadingScoreView, setIsLoadingScoreView] = useState(false);
 
   const config = ROUND_CONFIGS[round];
   const allCriteria = useMemo(() => criterionMap(config), [config]);
@@ -475,6 +502,35 @@ export default function Interview() {
     });
   };
 
+  const openScoreBreakdown = async (applicant: Applicant) => {
+    setViewingApplicant(applicant);
+    setViewingScores(null);
+    setIsLoadingScoreView(true);
+    try {
+      const { data, error } = await supabase.rpc('get_application_interview_scores', {
+        p_application_id: applicant.id,
+        p_round: round,
+      });
+      if (error) throw error;
+      const result = data as unknown as ExistingScore[] | { error: string };
+      if (!Array.isArray(result)) throw new Error(result.error || 'Failed to load score breakdown');
+      setViewingScores(result);
+    } catch (err) {
+      console.error('Error loading score breakdown:', err);
+      toast.error('Failed to load score breakdown');
+      setViewingApplicant(null);
+    } finally {
+      setIsLoadingScoreView(false);
+    }
+  };
+
+  // A candidate with no scores yet has nothing to view, so clicking the row
+  // falls back to select-for-grading; the checkbox always selects regardless.
+  const handleRosterRowClick = (a: Applicant) => {
+    if (a.score_count > 0) openScoreBreakdown(a);
+    else toggleSelect(a.id);
+  };
+
   const startGrading = async () => {
     const initial: Record<string, CandidateFormState> = {};
     for (const id of selectedIds) {
@@ -507,17 +563,25 @@ export default function Interview() {
     }));
   };
 
+  const missingFieldsFor = (applicant: Applicant): string[] => {
+    const form = forms[applicant.id];
+    if (!form) return ['scores'];
+    const missing: string[] = [];
+    const allScored = config.sections.every((s) => s.criteria.every((c) => form.scores[s.key]?.[c.key] !== undefined));
+    if (!allScored) missing.push('all rubric scores');
+    if (!form.recommendation) missing.push('a recommendation');
+    return missing;
+  };
+
+  const isFormComplete = (applicant: Applicant) => missingFieldsFor(applicant).length === 0;
+
   const submitCandidate = async (applicant: Applicant) => {
     const form = forms[applicant.id];
     if (!user || !form) return;
 
-    const allScored = config.sections.every((s) => s.criteria.every((c) => form.scores[s.key]?.[c.key] !== undefined));
-    if (!allScored) {
-      toast.error(`Please score every criterion for ${getFullName(applicant)}`);
-      return;
-    }
-    if (!form.recommendation) {
-      toast.error(`Please pick a recommendation for ${getFullName(applicant)}`);
+    const missing = missingFieldsFor(applicant);
+    if (missing.length > 0) {
+      toast.error(`${getFullName(applicant)}: missing ${missing.join(' and ')}`);
       return;
     }
 
@@ -575,6 +639,23 @@ export default function Interview() {
 
   const selectedApplicants = applicants.filter((a) => selectedIds.includes(a.id));
   const scoredByMeCount = applicants.filter((a) => a.scored_by_me).length;
+  const incompleteApplicants = selectedApplicants.filter((a) => !isFormComplete(a));
+  const allReadyToSubmit = selectedApplicants.length > 0 && incompleteApplicants.length === 0;
+
+  const submitAll = async () => {
+    if (!allReadyToSubmit) {
+      toast.error(`Finish scoring first: ${incompleteApplicants.map(getFullName).join(', ')}`);
+      return;
+    }
+    setIsSubmittingAll(true);
+    try {
+      for (const applicant of selectedApplicants) {
+        await submitCandidate(applicant);
+      }
+    } finally {
+      setIsSubmittingAll(false);
+    }
+  };
 
   if (authLoading || isLoading) {
     return (
@@ -640,9 +721,20 @@ export default function Interview() {
             </TabsList>
           </Tabs>
           {grading && (
-            <Button variant="outline" size="sm" onClick={() => setGrading(false)}>
-              <ArrowLeft className="w-4 h-4 mr-2" /> Back to Roster
-            </Button>
+            <div className="flex items-center gap-2 flex-wrap">
+              {incompleteApplicants.length > 0 && (
+                <span className="text-xs text-amber-600">
+                  Incomplete: {incompleteApplicants.map(getFullName).join(', ')}
+                </span>
+              )}
+              <Button variant="outline" size="sm" onClick={() => setGrading(false)}>
+                <ArrowLeft className="w-4 h-4 mr-2" /> Back to Roster
+              </Button>
+              <Button size="sm" onClick={submitAll} disabled={!allReadyToSubmit || isSubmittingAll}>
+                {isSubmittingAll ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                Submit All ({selectedApplicants.length})
+              </Button>
+            </div>
           )}
         </div>
 
@@ -696,7 +788,8 @@ export default function Interview() {
                       <div
                         key={a.id}
                         className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors cursor-pointer"
-                        onClick={() => toggleSelect(a.id)}
+                        onClick={() => handleRosterRowClick(a)}
+                        title={a.score_count > 0 ? 'Click to view existing score breakdown' : 'Click to select for grading'}
                       >
                         <div className="flex items-center gap-3">
                           <Checkbox checked={selectedIds.includes(a.id)} onCheckedChange={() => toggleSelect(a.id)} onClick={(e) => e.stopPropagation()} />
@@ -717,6 +810,7 @@ export default function Interview() {
                           ) : (
                             <Badge variant="outline" className="text-muted-foreground border-muted">Pending</Badge>
                           )}
+                          {a.score_count > 0 && <Eye className="w-4 h-4 text-muted-foreground" />}
                         </div>
                       </div>
                     ))
@@ -921,9 +1015,19 @@ export default function Interview() {
                           <Textarea value={form.overallImpression} onChange={(e) => updateForm(a.id, { overallImpression: e.target.value })} rows={3} className="text-xs" />
                         </div>
 
-                        <Button onClick={() => submitCandidate(a)} disabled={form.isSubmitting} className="w-full" size="sm">
-                          {form.isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : form.isSubmitted ? 'Re-submit' : 'Submit Score'}
-                        </Button>
+                        {form.isSubmitting ? (
+                          <p className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Loader2 className="w-3 h-3 animate-spin" /> Submitting…
+                          </p>
+                        ) : isFormComplete(a) ? (
+                          <p className="text-xs text-green-600 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> Ready to submit
+                          </p>
+                        ) : (
+                          <p className="text-xs text-amber-600">
+                            Missing: {missingFieldsFor(a).join(', ')}
+                          </p>
+                        )}
                       </CardContent>
                     </Card>
                   );
@@ -933,6 +1037,54 @@ export default function Interview() {
           </div>
         )}
       </main>
+
+      <Dialog open={!!viewingApplicant} onOpenChange={(open) => { if (!open) { setViewingApplicant(null); setViewingScores(null); } }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{viewingApplicant ? getFullName(viewingApplicant) : ''} — Score Breakdown</DialogTitle>
+            <DialogDescription>
+              {round === 'R1' ? 'Round 1' : 'Round 2'} scores submitted so far{viewingApplicant?.candidate_number ? ` (#${viewingApplicant.candidate_number})` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          {isLoadingScoreView ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            </div>
+          ) : !viewingScores || viewingScores.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-6 text-center">No scores submitted yet for this round.</p>
+          ) : (
+            <div className="space-y-4">
+              {viewingScores.map((s, i) => (
+                <div key={i} className="rounded-lg border border-border p-3 space-y-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">
+                      {[s.interviewer_name, s.co_interviewer_name].filter(Boolean).join(', ')}
+                      {s.room_label ? ` — ${s.room_label}` : ''}
+                    </span>
+                    <span className="font-semibold tabular-nums">{s.total_score.toFixed(1)}</span>
+                  </div>
+                  {s.recommendation && (
+                    <Badge variant="outline" className={`text-xs ${RECOMMENDATION_STYLE[s.recommendation] || ''}`}>
+                      {s.recommendation.replace('juniors_', 'Jr ')}
+                    </Badge>
+                  )}
+                  <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
+                    {Object.entries(s.section_totals || {}).map(([k, v]) => (
+                      <span key={k}>{k}: {v.toFixed(1)}</span>
+                    ))}
+                    {s.candidate_phone && <span>Phone: {s.candidate_phone}</span>}
+                    {Object.entries(s.availability || {}).map(([k, v]) => (
+                      <span key={k}>{k}: {v ? 'Yes' : 'No'}</span>
+                    ))}
+                  </div>
+                  {s.glaring_concerns && <p className="text-xs text-amber-700">Concerns: {s.glaring_concerns}</p>}
+                  {s.overall_impression && <p className="text-muted-foreground">{s.overall_impression}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
