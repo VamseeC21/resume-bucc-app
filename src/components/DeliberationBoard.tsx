@@ -15,7 +15,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Loader2, GripVertical, ChevronDown, Sparkles, X, FileText, Video } from 'lucide-react';
+import { Loader2, GripVertical, ChevronDown, Sparkles, ArrowDownWideNarrow, X, FileText, Video } from 'lucide-react';
 import { toast } from 'sonner';
 
 type Round = 'RESUME' | 'R1' | 'R2';
@@ -447,6 +447,34 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
     })();
   };
 
+  const sortByScore = async () => {
+    if (rows.length < 2) return;
+
+    // Highest score first; candidates with no score yet fall to the bottom
+    // (in their prior relative order) rather than being scattered randomly.
+    const indexed = rows.map((r, i) => ({ r, i, val: scoreValueFor(r, round) }));
+    indexed.sort((a, b) => {
+      if (a.val === null && b.val === null) return a.i - b.i;
+      if (a.val === null) return 1;
+      if (b.val === null) return -1;
+      return b.val - a.val;
+    });
+    const reordered = indexed.map(({ r }, i) => ({ ...r, sort_order: i }));
+    setRows(reordered);
+
+    try {
+      const { error } = await supabase.rpc('reorder_round_candidates', {
+        p_updates: reordered.map((r) => ({ id: r.round_candidate_id, sort_order: r.sort_order })),
+      });
+      if (error) throw error;
+      toast.success('Sorted by score');
+    } catch (err) {
+      console.error('Error sorting by score:', err);
+      toast.error('Failed to save order — refreshing');
+      fetchRows();
+    }
+  };
+
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -486,10 +514,16 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
             <TabsTrigger value="R2">Round 2</TabsTrigger>
           </TabsList>
         </Tabs>
-        <Button variant="outline" size="sm" onClick={autoColorByScore}>
-          <Sparkles className="w-4 h-4 mr-2" />
-          Auto-color by std. dev.
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={sortByScore}>
+            <ArrowDownWideNarrow className="w-4 h-4 mr-2" />
+            Sort by score
+          </Button>
+          <Button variant="outline" size="sm" onClick={autoColorByScore}>
+            <Sparkles className="w-4 h-4 mr-2" />
+            Auto-color by std. dev.
+          </Button>
+        </div>
       </div>
 
       <Card className="glass-panel">
