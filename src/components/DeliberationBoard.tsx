@@ -15,7 +15,10 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Loader2, GripVertical, ChevronDown, Sparkles, ArrowDownWideNarrow, X, FileText, Video } from 'lucide-react';
+import {
+  Loader2, GripVertical, ChevronDown, ChevronUp, Sparkles,
+  Download, X, FileText, Video,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 type Round = 'RESUME' | 'R1' | 'R2';
@@ -47,6 +50,7 @@ interface DeliberationRow {
   major: string | null;
   gender: string | null;
   video_youtube_url: string | null;
+  video_question_2_choice: string | null;
   resume_id: string | null;
   color: string | null;
   sort_order: number;
@@ -72,12 +76,15 @@ interface Category {
   title?: string;
 }
 
+type SortValue = number | string | null;
+
 const PALETTE: Array<{ key: string; hex: string; label: string }> = [
-  { key: 'dark-green', hex: '#15803d', label: 'Dark green' },
-  { key: 'green', hex: '#4ade80', label: 'Green' },
-  { key: 'yellow', hex: '#facc15', label: 'Yellow' },
-  { key: 'red', hex: '#f87171', label: 'Red' },
-  { key: 'dark-red', hex: '#b91c1c', label: 'Dark red' },
+  { key: 'dark-green', hex: '#15803d', label: 'Guaranteed / accept' },
+  { key: 'green', hex: '#4ade80', label: 'Leaning yes' },
+  { key: 'yellow', hex: '#facc15', label: 'Middle ground' },
+  { key: 'red', hex: '#f87171', label: 'Leaning no' },
+  { key: 'dark-red', hex: '#b91c1c', label: 'Reject' },
+  { key: 'purple', hex: '#a855f7', label: 'Invite to reapply' },
 ];
 
 const RECOMMENDATION_STYLE: Record<string, string> = {
@@ -90,6 +97,10 @@ const RECOMMENDATION_STYLE: Record<string, string> = {
 
 function colorHex(key: string | null): string | undefined {
   return PALETTE.find((c) => c.key === key)?.hex;
+}
+
+function colorLabel(key: string | null): string {
+  return PALETTE.find((c) => c.key === key)?.label || '';
 }
 
 function fullName(row: DeliberationRow): string {
@@ -164,17 +175,52 @@ function scoreValueFor(row: DeliberationRow, round: Round): number | null {
   return round === 'RESUME' ? row.combined_score ?? null : row.avg_score ?? null;
 }
 
+function csvCell(value: unknown): string {
+  return `"${String(value ?? '').replace(/"/g, '""')}"`;
+}
+
+// Nulls always sink to the bottom regardless of direction, so unscored
+// candidates don't scatter to the top on an ascending sort.
+function compareValues(a: SortValue, b: SortValue, dir: 'asc' | 'desc', tieA: number, tieB: number): number {
+  if (a === null && b === null) return tieA - tieB;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  if (typeof a === 'string' || typeof b === 'string') {
+    const cmp = String(a).localeCompare(String(b), undefined, { numeric: true });
+    return dir === 'asc' ? cmp : -cmp;
+  }
+  const cmp = (a as number) - (b as number);
+  return dir === 'asc' ? cmp : -cmp;
+}
+
+function sortRowsByValue(rows: DeliberationRow[], getValue: (r: DeliberationRow) => SortValue, dir: 'asc' | 'desc'): DeliberationRow[] {
+  const indexed = rows.map((r, i) => ({ r, i, val: getValue(r) }));
+  indexed.sort((a, b) => compareValues(a.val, b.val, dir, a.i, b.i));
+  return indexed.map(({ r }, i) => ({ ...r, sort_order: i }));
+}
+
+const RESUME_ROW_TEMPLATE = '32px 24px 24px 60px minmax(160px,1fr) 60px minmax(90px,1fr) 60px 90px 90px 90px minmax(140px,1fr) 90px';
+
+function interviewRowTemplate(sectionCount: number): string {
+  return `32px 24px 24px 60px minmax(140px,1fr) 60px 70px 60px 90px repeat(${sectionCount}, 70px) 70px 140px minmax(140px,1fr) minmax(140px,1fr) 60px 70px 50px 50px 32px`;
+}
+
 function SortableRow({
-  row, round, sectionKeys, selected, onToggleSelect, expanded, onToggleExpand, onViewResume,
+  row, round, sectionKeys, gridTemplate, position, selected, onToggleSelect, expanded, onToggleExpand,
+  onViewResume, onNotesChange, onNotesSave,
 }: {
   row: DeliberationRow;
   round: Round;
   sectionKeys: string[];
+  gridTemplate: string;
+  position: number;
   selected: boolean;
   onToggleSelect: (id: string) => void;
   expanded: boolean;
   onToggleExpand: (id: string) => void;
   onViewResume: (resumeId: string) => void;
+  onNotesChange: (id: string, notes: string) => void;
+  onNotesSave: (id: string, notes: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: row.round_candidate_id });
 
@@ -189,16 +235,30 @@ function SortableRow({
   const total = totalFor(row, round);
   const isResume = round === 'RESUME';
 
+  const notesInput = (
+    <input
+      type="text"
+      value={row.notes ?? ''}
+      onChange={(e) => onNotesChange(row.round_candidate_id, e.target.value)}
+      onBlur={(e) => onNotesSave(row.round_candidate_id, e.target.value)}
+      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+      placeholder="Add a note…"
+      title={row.notes || ''}
+      className="w-full bg-transparent border-0 border-b border-dashed border-transparent hover:border-border focus:border-primary focus:outline-none text-xs px-1 py-0.5 truncate"
+    />
+  );
+
   if (isResume) {
     return (
       <div ref={setNodeRef} style={style} className="rounded-lg border border-border overflow-hidden bg-card">
         <div
           className="grid items-center gap-2 px-2 py-2 text-sm overflow-x-auto"
           style={{
-            gridTemplateColumns: `24px 24px 60px minmax(160px,1fr) 60px minmax(90px,1fr) 60px repeat(${categories.length}, 90px) 90px 60px`,
+            gridTemplateColumns: gridTemplate,
             ...(hex ? { borderLeft: `6px solid ${hex}`, backgroundColor: `${hex}14` } : { borderLeft: '6px solid transparent' }),
           }}
         >
+          <span className="text-xs text-muted-foreground text-center tabular-nums select-none" title="Position in current order">{position}</span>
           <button type="button" className="cursor-grab active:cursor-grabbing text-muted-foreground touch-none" {...attributes} {...listeners} aria-label="Drag to reorder">
             <GripVertical className="w-4 h-4" />
           </button>
@@ -216,7 +276,17 @@ function SortableRow({
           <span className="text-right font-semibold tabular-nums">
             {total.value !== null ? total.value.toFixed(1) : '—'}
           </span>
-          <span className="flex gap-1">
+          {notesInput}
+          <span className="flex items-center gap-1">
+            {row.video_question_2_choice && (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1 shrink-0"
+                title={`Answered Question 2, option ${row.video_question_2_choice}`}
+              >
+                Q2:{row.video_question_2_choice}
+              </Badge>
+            )}
             {row.video_youtube_url && (
               <button type="button" onClick={() => window.open(row.video_youtube_url!, '_blank')} title="Watch video">
                 <Video className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
@@ -243,10 +313,11 @@ function SortableRow({
         <div
           className="grid items-center gap-2 px-2 py-2 text-sm overflow-x-auto"
           style={{
-            gridTemplateColumns: `24px 24px 60px minmax(140px,1fr) 60px 70px 60px 90px repeat(${categories.length}, 70px) 70px 140px minmax(160px,1fr) 60px 70px 50px 50px 32px`,
+            gridTemplateColumns: gridTemplate,
             ...(hex ? { borderLeft: `6px solid ${hex}`, backgroundColor: `${hex}14` } : { borderLeft: '6px solid transparent' }),
           }}
         >
+          <span className="text-xs text-muted-foreground text-center tabular-nums select-none" title="Position in current order">{position}</span>
           <button type="button" className="cursor-grab active:cursor-grabbing text-muted-foreground touch-none" {...attributes} {...listeners} aria-label="Drag to reorder">
             <GripVertical className="w-4 h-4" />
           </button>
@@ -273,6 +344,7 @@ function SortableRow({
           </span>
           <span className="text-xs text-muted-foreground truncate" title={graders}>{graders}</span>
           <span className="text-xs text-muted-foreground truncate" title={comments}>{comments || '—'}</span>
+          {notesInput}
           <span className="flex gap-1">
             {row.video_youtube_url && (
               <button type="button" onClick={() => window.open(row.video_youtube_url!, '_blank')} title="Watch video">
@@ -327,6 +399,29 @@ function SortableRow({
   );
 }
 
+function SortHeader({ label, sortKey, getValue, align, sortState, onSort }: {
+  label: string;
+  sortKey: string;
+  getValue: (r: DeliberationRow) => SortValue;
+  align?: 'right' | 'center';
+  sortState: { key: string; dir: 'asc' | 'desc' } | null;
+  onSort: (key: string, getValue: (r: DeliberationRow) => SortValue) => void;
+}) {
+  const isActive = sortState?.key === sortKey;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(sortKey, getValue)}
+      className={`flex items-center gap-0.5 hover:text-foreground ${align === 'right' ? 'justify-end w-full' : ''}`}
+    >
+      {label}
+      {isActive ? (
+        sortState!.dir === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
+      ) : null}
+    </button>
+  );
+}
+
 function CheckCircle({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 20 20" fill="currentColor" className={className}>
@@ -344,6 +439,8 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [sortState, setSortState] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -361,7 +458,20 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
       if (error) throw error;
       const result = data as unknown as DeliberationRow[] | { error: string };
       if (!Array.isArray(result)) throw new Error(result.error || 'Failed to load deliberation data');
-      setRows(result);
+
+      // Always come in sorted by score, highest first, so no manual step is
+      // needed to see the ranking that actually matters for deliberation.
+      const sorted = sortRowsByValue(result, (r) => scoreValueFor(r, round), 'desc');
+      setRows(sorted);
+      setSortState({ key: 'score', dir: 'desc' });
+
+      if (sorted.length > 1) {
+        supabase.rpc('reorder_round_candidates', {
+          p_updates: sorted.map((r) => ({ id: r.round_candidate_id, sort_order: r.sort_order })),
+        }).then(({ error: reorderError }) => {
+          if (reorderError) console.error('Error persisting default score order:', reorderError);
+        });
+      }
     } catch (err) {
       console.error('Error loading deliberation data:', err);
       toast.error(err instanceof Error ? err.message : 'Failed to load deliberation data');
@@ -406,6 +516,8 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
     }
   };
 
+  // Purple ("invite to reapply") is intentionally never auto-assigned here —
+  // it's a judgment call about a specific person, not a score threshold.
   const autoColorByScore = () => {
     const scored = rows.filter((r) => scoreValueFor(r, round) !== null);
     if (scored.length < 2) {
@@ -420,11 +532,12 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
       const val = scoreValueFor(r, round);
       if (val === null) return r;
       const z = (val - mean) / sd;
-      let color: string | null = null;
+      let color: string;
       if (z >= 2) color = 'dark-green';
       else if (z >= 1) color = 'green';
       else if (z <= -2) color = 'dark-red';
       else if (z <= -1) color = 'red';
+      else color = 'yellow';
       return { ...r, color };
     });
 
@@ -447,29 +560,22 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
     })();
   };
 
-  const sortByScore = async () => {
+  // Backs every clickable column header. Toggles direction on repeat clicks
+  // of the same column.
+  const sortRows = async (key: string, getValue: (r: DeliberationRow) => SortValue) => {
     if (rows.length < 2) return;
-
-    // Highest score first; candidates with no score yet fall to the bottom
-    // (in their prior relative order) rather than being scattered randomly.
-    const indexed = rows.map((r, i) => ({ r, i, val: scoreValueFor(r, round) }));
-    indexed.sort((a, b) => {
-      if (a.val === null && b.val === null) return a.i - b.i;
-      if (a.val === null) return 1;
-      if (b.val === null) return -1;
-      return b.val - a.val;
-    });
-    const reordered = indexed.map(({ r }, i) => ({ ...r, sort_order: i }));
+    const dir: 'asc' | 'desc' = sortState?.key === key && sortState.dir === 'desc' ? 'asc' : 'desc';
+    const reordered = sortRowsByValue(rows, getValue, dir);
     setRows(reordered);
+    setSortState({ key, dir });
 
     try {
       const { error } = await supabase.rpc('reorder_round_candidates', {
         p_updates: reordered.map((r) => ({ id: r.round_candidate_id, sort_order: r.sort_order })),
       });
       if (error) throw error;
-      toast.success('Sorted by score');
     } catch (err) {
-      console.error('Error sorting by score:', err);
+      console.error('Error sorting:', err);
       toast.error('Failed to save order — refreshing');
       fetchRows();
     }
@@ -485,6 +591,7 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
 
     const reordered = arrayMove(rows, oldIndex, newIndex).map((r, i) => ({ ...r, sort_order: i }));
     setRows(reordered);
+    setSortState(null);
 
     try {
       const { error } = await supabase.rpc('reorder_round_candidates', {
@@ -498,11 +605,84 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
     }
   };
 
+  const updateNotesLocal = (id: string, notes: string) => {
+    setRows((prev) => prev.map((r) => (r.round_candidate_id === id ? { ...r, notes } : r)));
+  };
+
+  const saveNotes = async (id: string, notes: string) => {
+    try {
+      const { error } = await supabase.rpc('set_round_candidate_notes', { p_id: id, p_notes: notes });
+      if (error) throw error;
+    } catch (err) {
+      console.error('Error saving note:', err);
+      toast.error('Failed to save note — refreshing');
+      fetchRows();
+    }
+  };
+
+  const exportToCsv = async () => {
+    if (rows.length === 0) { toast.error('No candidates to export'); return; }
+    setIsExporting(true);
+    try {
+      const withLinks = await Promise.all(rows.map(async (r) => {
+        let resumeUrl = '';
+        if (r.resume_id) {
+          const { data: resume } = await supabase.from('resumes').select('pdf_path').eq('id', r.resume_id).maybeSingle();
+          if (resume?.pdf_path) {
+            const { data: signed } = await supabase.storage.from('resumes').createSignedUrl(resume.pdf_path, 86400);
+            resumeUrl = signed?.signedUrl || '';
+          }
+        }
+        return { r, resumeUrl };
+      }));
+
+      let headers: string[];
+      let csvRows: unknown[][];
+
+      if (round === 'RESUME') {
+        headers = ['ID', 'Name', 'Email', 'Year', 'Major', 'Gender', 'Q2 Choice', 'ELO', 'Video Avg', 'Combined', 'Color', 'Notes', 'Video Link', 'Resume Link'];
+        csvRows = withLinks.map(({ r, resumeUrl }) => [
+          r.candidate_number ?? '', fullName(r), r.applicant_email, r.year, r.major || '', r.gender || '',
+          r.video_question_2_choice || '',
+          r.elo_rating?.toFixed(1) ?? '', r.video_avg_score?.toFixed(1) ?? '', r.combined_score?.toFixed(1) ?? '',
+          colorLabel(r.color), r.notes || '', r.video_youtube_url || '', resumeUrl,
+        ]);
+      } else {
+        headers = ['ID', 'Name', 'Email', 'Year', 'Major', 'Gender', 'Recommendations', ...sectionKeys, 'Avg Total', 'Graders', 'Comments', 'Notes', 'Color', 'App Rank', 'Video Link', 'Resume Link'];
+        csvRows = withLinks.map(({ r, resumeUrl }) => {
+          const avgs = avgSectionTotals(r);
+          return [
+            r.candidate_number ?? '', fullName(r), r.applicant_email, r.year, r.major || '', r.gender || '',
+            recommendationsFor(r).join('; '),
+            ...sectionKeys.map((k) => (avgs[k] !== undefined ? avgs[k].toFixed(1) : '')),
+            r.avg_score?.toFixed(1) ?? '', gradersFor(r), commentsFor(r), r.notes || '',
+            colorLabel(r.color), r.application_ranking ?? '', r.video_youtube_url || '', resumeUrl,
+          ];
+        });
+      }
+
+      const csvContent = [headers, ...csvRows].map((row) => row.map(csvCell).join(',')).join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `Deliberation_${ROUND_LABEL[round].replace(/\s+/g, '_')}_${gameName.replace(/[^a-z0-9]/gi, '_')}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Exported to CSV');
+    } catch (err) {
+      console.error('Error exporting CSV:', err);
+      toast.error('Failed to export CSV');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const rowIds = useMemo(() => rows.map((r) => r.round_candidate_id), [rows]);
   const isResume = round === 'RESUME';
-  const headerTemplate = isResume
-    ? `24px 24px 60px minmax(160px,1fr) 60px minmax(90px,1fr) 60px repeat(${sectionKeys.length || 2}, 90px) 90px 60px`
-    : `24px 24px 60px minmax(140px,1fr) 60px 70px 60px 90px repeat(${sectionKeys.length}, 70px) 70px 140px minmax(160px,1fr) 60px 70px 50px 50px 32px`;
+  const gridTemplate = isResume ? RESUME_ROW_TEMPLATE : interviewRowTemplate(sectionKeys.length);
 
   return (
     <div className="space-y-4">
@@ -514,14 +694,14 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
             <TabsTrigger value="R2">Round 2</TabsTrigger>
           </TabsList>
         </Tabs>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={sortByScore}>
-            <ArrowDownWideNarrow className="w-4 h-4 mr-2" />
-            Sort by score
-          </Button>
+        <div className="flex items-center gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={autoColorByScore}>
             <Sparkles className="w-4 h-4 mr-2" />
             Auto-color by std. dev.
+          </Button>
+          <Button variant="outline" size="sm" onClick={exportToCsv} disabled={isExporting || rows.length === 0}>
+            {isExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+            Export CSV
           </Button>
         </div>
       </div>
@@ -530,11 +710,12 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
         <CardHeader>
           <CardTitle>Deliberation — {ROUND_LABEL[round]}</CardTitle>
           <CardDescription>
-            Drag to reorder, select multiple candidates and assign a color. {gameName}
+            Sorted by score by default — drag to reorder or click a column header to re-sort, select multiple candidates and assign a color, click Notes to type inline. {gameName}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex items-center gap-3 mb-4 flex-wrap">
+            <span className="text-sm font-medium">{rows.length} candidate{rows.length === 1 ? '' : 's'}</span>
             <span className="text-sm text-muted-foreground">{selectedIds.size} selected</span>
             <Button variant="ghost" size="sm" onClick={selectAll}>Select all</Button>
             <Button variant="ghost" size="sm" onClick={clearSelection} disabled={selectedIds.size === 0}>Clear</Button>
@@ -571,40 +752,54 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
             <div className="overflow-x-auto">
               <div
                 className="grid gap-2 px-2 pb-2 text-xs font-medium text-muted-foreground min-w-max"
-                style={{ gridTemplateColumns: headerTemplate }}
+                style={{ gridTemplateColumns: gridTemplate }}
               >
+                <span className="text-center" title="Position in current order">#</span>
                 <span /><span />
-                <span>ID</span><span>Name</span><span>Year</span><span>Major</span><span>Gender</span>
+                <SortHeader label="ID" sortKey="id" getValue={(r) => r.candidate_number ?? null} sortState={sortState} onSort={sortRows} />
+                <SortHeader label="Name" sortKey="name" getValue={(r) => fullName(r)} sortState={sortState} onSort={sortRows} />
+                <SortHeader label="Year" sortKey="year" getValue={(r) => r.year} sortState={sortState} onSort={sortRows} />
+                <SortHeader label="Major" sortKey="major" getValue={(r) => r.major} sortState={sortState} onSort={sortRows} />
+                <span>Gender</span>
                 {isResume ? (
                   <>
-                    <span className="text-right">ELO</span>
-                    <span className="text-right">Video Avg</span>
-                    <span className="text-right">Combined</span>
+                    <SortHeader label="ELO" sortKey="elo" getValue={(r) => r.elo_rating ?? null} align="right" sortState={sortState} onSort={sortRows} />
+                    <SortHeader label="Video Avg" sortKey="video" getValue={(r) => r.video_avg_score ?? null} align="right" sortState={sortState} onSort={sortRows} />
+                    <SortHeader label="Combined" sortKey="score" getValue={(r) => scoreValueFor(r, round)} align="right" sortState={sortState} onSort={sortRows} />
+                    <span>Notes</span>
                     <span>Links</span>
                   </>
                 ) : (
                   <>
                     <span>Rec.</span>
-                    {sectionKeys.map((k) => <span key={k} className="text-right">{k}</span>)}
-                    <span className="text-right">Avg Total</span><span>Graders</span><span>Comments</span><span>Links</span>
-                    <span className="text-right">Rank</span><span className="text-center">R1</span><span className="text-center">R2</span><span />
+                    {sectionKeys.map((k) => (
+                      <SortHeader key={k} label={k} sortKey={`sec:${k}`} getValue={(r) => avgSectionTotals(r)[k] ?? null} align="right" sortState={sortState} onSort={sortRows} />
+                    ))}
+                    <SortHeader label="Avg Total" sortKey="score" getValue={(r) => scoreValueFor(r, round)} align="right" sortState={sortState} onSort={sortRows} />
+                    <span>Graders</span><span>Comments</span><span>Notes</span><span>Links</span>
+                    <SortHeader label="Rank" sortKey="rank" getValue={(r) => r.application_ranking ?? null} align="right" sortState={sortState} onSort={sortRows} />
+                    <span className="text-center">R1</span><span className="text-center">R2</span><span />
                   </>
                 )}
               </div>
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
                 <SortableContext items={rowIds} strategy={verticalListSortingStrategy}>
                   <div className="space-y-2 min-w-max">
-                    {rows.map((row) => (
+                    {rows.map((row, index) => (
                       <SortableRow
                         key={row.round_candidate_id}
                         row={row}
                         round={round}
                         sectionKeys={sectionKeys}
+                        gridTemplate={gridTemplate}
+                        position={index + 1}
                         selected={selectedIds.has(row.round_candidate_id)}
                         onToggleSelect={toggleSelect}
                         expanded={expandedId === row.round_candidate_id}
                         onToggleExpand={(id) => setExpandedId((prev) => (prev === id ? null : id))}
                         onViewResume={viewResume}
+                        onNotesChange={updateNotesLocal}
+                        onNotesSave={saveNotes}
                       />
                     ))}
                   </div>

@@ -559,6 +559,10 @@ export type Database = {
         }
         Returns: Json
       }
+      get_application_interview_scores: {
+        Args: { p_application_id: string; p_round: string }
+        Returns: Json
+      }
       get_combined_rankings: { Args: { p_game_id: string }; Returns: Json }
       get_default_application_game: { Args: never; Returns: Json }
       get_next_pair: {
@@ -605,6 +609,10 @@ export type Database = {
       }
       set_round_candidate_color: {
         Args: { p_color: string; p_ids: string[] }
+        Returns: undefined
+      }
+      set_round_candidate_notes: {
+        Args: { p_id: string; p_notes: string }
         Returns: undefined
       }
       submit_application:
