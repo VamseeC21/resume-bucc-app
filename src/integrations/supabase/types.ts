@@ -565,6 +565,7 @@ export type Database = {
         Args: { p_game_id: string; p_user_id: string }
         Returns: Json
       }
+      get_resume_deliberation: { Args: { p_game_id: string }; Returns: Json }
       get_round_deliberation: {
         Args: { p_game_id: string; p_round: string }
         Returns: Json

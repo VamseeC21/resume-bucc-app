@@ -18,7 +18,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Loader2, GripVertical, ChevronDown, Sparkles, X, FileText, Video } from 'lucide-react';
 import { toast } from 'sonner';
 
-type Round = 'R1' | 'R2';
+type Round = 'RESUME' | 'R1' | 'R2';
 
 interface ScoreDetail {
   interviewer_id: string;
@@ -48,15 +48,28 @@ interface DeliberationRow {
   gender: string | null;
   video_youtube_url: string | null;
   resume_id: string | null;
-  application_ranking: number | null;
-  was_in_r1: boolean;
-  was_in_r2: boolean;
   color: string | null;
   sort_order: number;
   notes: string | null;
-  avg_score: number | null;
-  score_count: number;
-  scores: ScoreDetail[] | null;
+  // interview rounds (R1/R2) only
+  application_ranking?: number | null;
+  was_in_r1?: boolean;
+  was_in_r2?: boolean;
+  avg_score?: number | null;
+  score_count?: number;
+  scores?: ScoreDetail[] | null;
+  // resume round only
+  elo_rating?: number | null;
+  video_avg_score?: number | null;
+  video_grade_count?: number | null;
+  combined_score?: number | null;
+}
+
+interface Category {
+  key: string;
+  label: string;
+  value: number | null;
+  title?: string;
 }
 
 const PALETTE: Array<{ key: string; hex: string; label: string }> = [
@@ -90,10 +103,72 @@ function sectionKeysFor(rows: DeliberationRow[]): string[] {
   return Array.from(keys);
 }
 
+// Average each section's total across every grader who scored this candidate,
+// so the comparison table reflects a consensus per category rather than
+// whichever score happened to be submitted first.
+function avgSectionTotals(row: DeliberationRow): Record<string, number> {
+  const acc: Record<string, { sum: number; count: number }> = {};
+  (row.scores || []).forEach((s) => {
+    Object.entries(s.section_totals || {}).forEach(([k, v]) => {
+      const num = typeof v === 'number' ? v : Number(v);
+      if (Number.isNaN(num)) return;
+      if (!acc[k]) acc[k] = { sum: 0, count: 0 };
+      acc[k].sum += num;
+      acc[k].count += 1;
+    });
+  });
+  const out: Record<string, number> = {};
+  Object.entries(acc).forEach(([k, { sum, count }]) => { out[k] = sum / count; });
+  return out;
+}
+
+function categoriesFor(row: DeliberationRow, round: Round, sectionKeys: string[]): Category[] {
+  if (round === 'RESUME') {
+    return [
+      { key: 'elo', label: 'ELO', value: row.elo_rating ?? null },
+      {
+        key: 'video',
+        label: 'Video Avg',
+        value: row.video_avg_score ?? null,
+        title: row.video_grade_count ? `${row.video_grade_count} grader(s)` : undefined,
+      },
+    ];
+  }
+  const avgs = avgSectionTotals(row);
+  return sectionKeys.map((k) => ({ key: k, label: k, value: avgs[k] ?? null }));
+}
+
+function totalFor(row: DeliberationRow, round: Round): { label: string; value: number | null } {
+  if (round === 'RESUME') return { label: 'Combined', value: row.combined_score ?? null };
+  return { label: 'Avg Total', value: row.avg_score ?? null };
+}
+
+function gradersFor(row: DeliberationRow): string {
+  const names = new Set<string>();
+  (row.scores || []).forEach((s) => {
+    if (s.interviewer_name) names.add(s.interviewer_name);
+    if (s.co_interviewer_name) names.add(s.co_interviewer_name);
+  });
+  return Array.from(names).join(', ') || '—';
+}
+
+function recommendationsFor(row: DeliberationRow): string[] {
+  return (row.scores || []).map((s) => s.recommendation).filter((r): r is string => !!r);
+}
+
+function commentsFor(row: DeliberationRow): string {
+  return (row.scores || []).map((s) => s.overall_impression).filter(Boolean).join(' | ');
+}
+
+function scoreValueFor(row: DeliberationRow, round: Round): number | null {
+  return round === 'RESUME' ? row.combined_score ?? null : row.avg_score ?? null;
+}
+
 function SortableRow({
-  row, sectionKeys, selected, onToggleSelect, expanded, onToggleExpand, onViewResume,
+  row, round, sectionKeys, selected, onToggleSelect, expanded, onToggleExpand, onViewResume,
 }: {
   row: DeliberationRow;
+  round: Round;
   sectionKeys: string[];
   selected: boolean;
   onToggleSelect: (id: string) => void;
@@ -110,18 +185,17 @@ function SortableRow({
   };
 
   const hex = colorHex(row.color);
-  const primary = row.scores?.[0];
-  const graders = primary
-    ? [primary.interviewer_name, primary.co_interviewer_name].filter(Boolean).join(', ')
-    : '—';
+  const categories = categoriesFor(row, round, sectionKeys);
+  const total = totalFor(row, round);
+  const isResume = round === 'RESUME';
 
-  return (
-    <div ref={setNodeRef} style={style} className="rounded-lg border border-border overflow-hidden bg-card">
-      <Collapsible open={expanded} onOpenChange={() => onToggleExpand(row.round_candidate_id)}>
+  if (isResume) {
+    return (
+      <div ref={setNodeRef} style={style} className="rounded-lg border border-border overflow-hidden bg-card">
         <div
           className="grid items-center gap-2 px-2 py-2 text-sm overflow-x-auto"
           style={{
-            gridTemplateColumns: `24px 24px 60px minmax(140px,1fr) 60px 70px 60px 70px repeat(${sectionKeys.length}, 60px) 70px 140px minmax(160px,1fr) 60px 70px 50px 50px 32px`,
+            gridTemplateColumns: `24px 24px 60px minmax(160px,1fr) 60px minmax(90px,1fr) 60px repeat(${categories.length}, 90px) 90px 60px`,
             ...(hex ? { borderLeft: `6px solid ${hex}`, backgroundColor: `${hex}14` } : { borderLeft: '6px solid transparent' }),
           }}
         >
@@ -134,23 +208,71 @@ function SortableRow({
           <span className="text-xs text-muted-foreground">{row.year?.slice(0, 4)}</span>
           <span className="text-xs text-muted-foreground truncate" title={row.major || ''}>{row.major || '—'}</span>
           <span className="text-xs text-muted-foreground">{row.gender || '—'}</span>
-          <span>
-            {primary?.recommendation ? (
-              <Badge variant="outline" className={`text-[10px] px-1.5 ${RECOMMENDATION_STYLE[primary.recommendation] || ''}`}>
-                {primary.recommendation.replace('juniors_', 'Jr ')}
-              </Badge>
-            ) : '—'}
-          </span>
-          {sectionKeys.map((key) => (
-            <span key={key} className="text-xs text-right tabular-nums" title={key}>
-              {primary?.section_totals?.[key] !== undefined ? primary.section_totals[key].toFixed(1) : '—'}
+          {categories.map((c) => (
+            <span key={c.key} className="text-xs text-right tabular-nums" title={c.title}>
+              {c.value !== null ? c.value.toFixed(1) : '—'}
             </span>
           ))}
           <span className="text-right font-semibold tabular-nums">
-            {row.avg_score !== null ? row.avg_score.toFixed(1) : '—'}
+            {total.value !== null ? total.value.toFixed(1) : '—'}
+          </span>
+          <span className="flex gap-1">
+            {row.video_youtube_url && (
+              <button type="button" onClick={() => window.open(row.video_youtube_url!, '_blank')} title="Watch video">
+                <Video className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
+              </button>
+            )}
+            {row.resume_id && (
+              <button type="button" onClick={() => onViewResume(row.resume_id!)} title="View resume">
+                <FileText className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
+              </button>
+            )}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  const graders = gradersFor(row);
+  const recommendations = recommendationsFor(row);
+  const comments = commentsFor(row);
+
+  return (
+    <div ref={setNodeRef} style={style} className="rounded-lg border border-border overflow-hidden bg-card">
+      <Collapsible open={expanded} onOpenChange={() => onToggleExpand(row.round_candidate_id)}>
+        <div
+          className="grid items-center gap-2 px-2 py-2 text-sm overflow-x-auto"
+          style={{
+            gridTemplateColumns: `24px 24px 60px minmax(140px,1fr) 60px 70px 60px 90px repeat(${categories.length}, 70px) 70px 140px minmax(160px,1fr) 60px 70px 50px 50px 32px`,
+            ...(hex ? { borderLeft: `6px solid ${hex}`, backgroundColor: `${hex}14` } : { borderLeft: '6px solid transparent' }),
+          }}
+        >
+          <button type="button" className="cursor-grab active:cursor-grabbing text-muted-foreground touch-none" {...attributes} {...listeners} aria-label="Drag to reorder">
+            <GripVertical className="w-4 h-4" />
+          </button>
+          <Checkbox checked={selected} onCheckedChange={() => onToggleSelect(row.round_candidate_id)} aria-label={`Select ${fullName(row)}`} />
+          <span className="text-xs text-muted-foreground tabular-nums">{row.candidate_number ? `#${row.candidate_number}` : '—'}</span>
+          <span className="font-medium truncate" title={fullName(row)}>{fullName(row)}</span>
+          <span className="text-xs text-muted-foreground">{row.year?.slice(0, 4)}</span>
+          <span className="text-xs text-muted-foreground truncate" title={row.major || ''}>{row.major || '—'}</span>
+          <span className="text-xs text-muted-foreground">{row.gender || '—'}</span>
+          <span className="flex flex-wrap gap-0.5">
+            {recommendations.length > 0 ? recommendations.map((r, i) => (
+              <Badge key={i} variant="outline" className={`text-[10px] px-1 ${RECOMMENDATION_STYLE[r] || ''}`}>
+                {r.replace('juniors_', 'Jr ')}
+              </Badge>
+            )) : '—'}
+          </span>
+          {categories.map((c) => (
+            <span key={c.key} className="text-xs text-right tabular-nums" title={c.label}>
+              {c.value !== null ? c.value.toFixed(1) : '—'}
+            </span>
+          ))}
+          <span className="text-right font-semibold tabular-nums">
+            {total.value !== null ? total.value.toFixed(1) : '—'}
           </span>
           <span className="text-xs text-muted-foreground truncate" title={graders}>{graders}</span>
-          <span className="text-xs text-muted-foreground truncate" title={primary?.overall_impression || ''}>{primary?.overall_impression || '—'}</span>
+          <span className="text-xs text-muted-foreground truncate" title={comments}>{comments || '—'}</span>
           <span className="flex gap-1">
             {row.video_youtube_url && (
               <button type="button" onClick={() => window.open(row.video_youtube_url!, '_blank')} title="Watch video">
@@ -175,6 +297,7 @@ function SortableRow({
 
         <CollapsibleContent>
           <div className="px-4 pb-3 pt-1 space-y-3 border-t bg-muted/20">
+            <p className="text-xs text-muted-foreground">Per-grader breakdown</p>
             {(row.scores || []).map((s, i) => (
               <div key={i} className="text-sm space-y-1">
                 <div className="flex justify-between">
@@ -212,8 +335,10 @@ function CheckCircle({ className }: { className?: string }) {
   );
 }
 
+const ROUND_LABEL: Record<Round, string> = { RESUME: 'Resume', R1: 'Round 1', R2: 'Round 2' };
+
 export default function DeliberationBoard({ gameId, gameName }: { gameId: string; gameName: string }) {
-  const [round, setRound] = useState<Round>('R1');
+  const [round, setRound] = useState<Round>('RESUME');
   const [rows, setRows] = useState<DeliberationRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -230,7 +355,9 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
     setSelectedIds(new Set());
     try {
       await supabase.rpc('seed_round_candidates', { p_game_id: gameId, p_round: round });
-      const { data, error } = await supabase.rpc('get_round_deliberation', { p_game_id: gameId, p_round: round });
+      const rpcName = round === 'RESUME' ? 'get_resume_deliberation' : 'get_round_deliberation';
+      const rpcParams = round === 'RESUME' ? { p_game_id: gameId } : { p_game_id: gameId, p_round: round };
+      const { data, error } = await supabase.rpc(rpcName, rpcParams);
       if (error) throw error;
       const result = data as unknown as DeliberationRow[] | { error: string };
       if (!Array.isArray(result)) throw new Error(result.error || 'Failed to load deliberation data');
@@ -245,7 +372,7 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
-  const sectionKeys = useMemo(() => sectionKeysFor(rows), [rows]);
+  const sectionKeys = useMemo(() => (round === 'RESUME' ? [] : sectionKeysFor(rows)), [rows, round]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -280,18 +407,19 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
   };
 
   const autoColorByScore = () => {
-    const scored = rows.filter((r) => r.avg_score !== null);
+    const scored = rows.filter((r) => scoreValueFor(r, round) !== null);
     if (scored.length < 2) {
       toast.info('Need at least a couple of scored candidates to auto-color');
       return;
     }
-    const mean = scored.reduce((a, r) => a + (r.avg_score || 0), 0) / scored.length;
-    const variance = scored.reduce((a, r) => a + ((r.avg_score || 0) - mean) ** 2, 0) / scored.length;
+    const mean = scored.reduce((a, r) => a + (scoreValueFor(r, round) || 0), 0) / scored.length;
+    const variance = scored.reduce((a, r) => a + ((scoreValueFor(r, round) || 0) - mean) ** 2, 0) / scored.length;
     const sd = Math.sqrt(variance) || 1;
 
     const next = rows.map((r) => {
-      if (r.avg_score === null) return r;
-      const z = (r.avg_score - mean) / sd;
+      const val = scoreValueFor(r, round);
+      if (val === null) return r;
+      const z = (val - mean) / sd;
       let color: string | null = null;
       if (z >= 2) color = 'dark-green';
       else if (z >= 1) color = 'green';
@@ -343,12 +471,17 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
   };
 
   const rowIds = useMemo(() => rows.map((r) => r.round_candidate_id), [rows]);
+  const isResume = round === 'RESUME';
+  const headerTemplate = isResume
+    ? `24px 24px 60px minmax(160px,1fr) 60px minmax(90px,1fr) 60px repeat(${sectionKeys.length || 2}, 90px) 90px 60px`
+    : `24px 24px 60px minmax(140px,1fr) 60px 70px 60px 90px repeat(${sectionKeys.length}, 70px) 70px 140px minmax(160px,1fr) 60px 70px 50px 50px 32px`;
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <Tabs value={round} onValueChange={(v) => setRound(v as Round)}>
           <TabsList>
+            <TabsTrigger value="RESUME">Resume</TabsTrigger>
             <TabsTrigger value="R1">Round 1</TabsTrigger>
             <TabsTrigger value="R2">Round 2</TabsTrigger>
           </TabsList>
@@ -361,7 +494,7 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
 
       <Card className="glass-panel">
         <CardHeader>
-          <CardTitle>Deliberation — {round === 'R1' ? 'Round 1' : 'Round 2'}</CardTitle>
+          <CardTitle>Deliberation — {ROUND_LABEL[round]}</CardTitle>
           <CardDescription>
             Drag to reorder, select multiple candidates and assign a color. {gameName}
           </CardDescription>
@@ -404,13 +537,25 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
             <div className="overflow-x-auto">
               <div
                 className="grid gap-2 px-2 pb-2 text-xs font-medium text-muted-foreground min-w-max"
-                style={{ gridTemplateColumns: `24px 24px 60px minmax(140px,1fr) 60px 70px 60px 70px repeat(${sectionKeys.length}, 60px) 70px 140px minmax(160px,1fr) 60px 70px 50px 50px 32px` }}
+                style={{ gridTemplateColumns: headerTemplate }}
               >
                 <span /><span />
-                <span>ID</span><span>Name</span><span>Year</span><span>Major</span><span>Gender</span><span>Gut</span>
-                {sectionKeys.map((k) => <span key={k} className="text-right">{k}</span>)}
-                <span className="text-right">Total</span><span>Graders</span><span>Comments</span><span>Links</span>
-                <span className="text-right">Rank</span><span className="text-center">R1</span><span className="text-center">R2</span><span />
+                <span>ID</span><span>Name</span><span>Year</span><span>Major</span><span>Gender</span>
+                {isResume ? (
+                  <>
+                    <span className="text-right">ELO</span>
+                    <span className="text-right">Video Avg</span>
+                    <span className="text-right">Combined</span>
+                    <span>Links</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Rec.</span>
+                    {sectionKeys.map((k) => <span key={k} className="text-right">{k}</span>)}
+                    <span className="text-right">Avg Total</span><span>Graders</span><span>Comments</span><span>Links</span>
+                    <span className="text-right">Rank</span><span className="text-center">R1</span><span className="text-center">R2</span><span />
+                  </>
+                )}
               </div>
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
                 <SortableContext items={rowIds} strategy={verticalListSortingStrategy}>
@@ -419,6 +564,7 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
                       <SortableRow
                         key={row.round_candidate_id}
                         row={row}
+                        round={round}
                         sectionKeys={sectionKeys}
                         selected={selectedIds.has(row.round_candidate_id)}
                         onToggleSelect={toggleSelect}

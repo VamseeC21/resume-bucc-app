@@ -584,12 +584,11 @@ export default function Apply() {
                     </p>
                     <ul className="list-disc list-inside ml-4 space-y-1">
                       <li>
-                        <strong>A:</strong> What's something you care deeply about or could talk
-                        hours about? What draws you to it?
+                        <strong>A:</strong> What are three things you don't care about at all?
                       </li>
                       <li>
-                        <strong>B:</strong> What's a moment, interaction, or realization that
-                        quietly changed how you see people or the world?
+                        <strong>B:</strong> If you had to give yourself a nickname, what would it
+                        be and why?
                       </li>
                     </ul>
                     <p className="text-xs text-muted-foreground mt-2">
@@ -634,8 +633,8 @@ export default function Apply() {
                           <SelectValue placeholder="Select A or B" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="A">A - Something I care deeply about</SelectItem>
-                          <SelectItem value="B">B - A moment that changed my perspective</SelectItem>
+                          <SelectItem value="A">A - Three things I don't care about at all</SelectItem>
+                          <SelectItem value="B">B - My nickname and why</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
