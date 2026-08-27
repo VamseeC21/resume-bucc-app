@@ -11,9 +11,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Loader2, LogOut, Settings, Trophy, Users, FileText, CheckCircle2, Search, ArrowLeft, Upload, Phone, BookOpen, Eye } from 'lucide-react';
+import { Loader2, LogOut, Settings, Trophy, Users, FileText, CheckCircle2, Search, ArrowLeft, Upload, Phone, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 
 type Round = 'R1' | 'R2';
@@ -563,6 +562,20 @@ export default function Interview() {
     }));
   };
 
+  // The same question is read aloud to the whole group once, so the "which
+  // version was asked" choice is shared across candidates rather than picked
+  // per-candidate -- applied to every selected applicant's form at once.
+  const setVariantForAll = (criterionKey: string, value: string) => {
+    setForms((prev) => {
+      const next = { ...prev };
+      for (const id of selectedIds) {
+        if (!next[id]) continue;
+        next[id] = { ...next[id], variants: { ...next[id].variants, [criterionKey]: value } };
+      }
+      return next;
+    });
+  };
+
   const missingFieldsFor = (applicant: Applicant): string[] => {
     const form = forms[applicant.id];
     if (!form) return ['scores'];
@@ -712,7 +725,7 @@ export default function Interview() {
         </div>
       </header>
 
-      <main className={grading ? 'w-full max-w-[1900px] mx-auto px-4 py-6' : 'container mx-auto px-4 py-8'}>
+      <main className={grading ? 'w-full max-w-5xl mx-auto px-4 py-6' : 'container mx-auto px-4 py-8'}>
         <div className="mb-4 flex items-center justify-between flex-wrap gap-3">
           <Tabs value={round} onValueChange={(v) => { setRound(v as Round); setSelectedIds([]); setGrading(false); }}>
             <TabsList>
@@ -820,129 +833,83 @@ export default function Interview() {
             </Card>
           )
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4">
-            {/* Left: interview script/guide, one persistent scrollable panel */}
-            <div className="lg:sticky lg:top-20 lg:self-start lg:max-h-[calc(100vh-6rem)] overflow-y-auto">
-              <Card className="glass-panel">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <BookOpen className="w-4 h-4" /> Interview Guide
-                  </CardTitle>
-                  <CardDescription>{round === 'R1' ? 'Round 1' : 'Round 2'} — read-aloud script & rubric</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Accordion type="multiple" defaultValue={[config.sections[0]?.key]} className="w-full">
-                    {config.sections.filter((s) => s.script).map((s) => (
-                      <AccordionItem key={s.key} value={s.key}>
-                        <AccordionTrigger className="text-sm text-left">{s.title}</AccordionTrigger>
-                        <AccordionContent>
-                          <p className="text-xs whitespace-pre-line text-muted-foreground leading-relaxed">{s.script}</p>
-                        </AccordionContent>
-                      </AccordionItem>
-                    ))}
-                  </Accordion>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Right: shared session info + compact scoring grid + per-candidate wrap-up */}
-            <div className="space-y-4 min-w-0">
-              <Card className="glass-panel">
-                <CardContent className="pt-6">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Interviewer 1 (you)</Label>
-                      <Input value={user ? `${user.email}` : ''} disabled className="h-8 text-xs" />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Interviewer 2 Full Name</Label>
-                      <Input value={coInterviewerName} onChange={(e) => setCoInterviewerName(e.target.value)} placeholder="Co-interviewer's name" className="h-8 text-xs" />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Room</Label>
-                      <Input value={roomLabel} onChange={(e) => setRoomLabel(e.target.value)} placeholder="e.g. Room 3" className="h-8 text-xs" />
-                    </div>
+          <div className="max-w-3xl mx-auto space-y-4">
+            <Card className="glass-panel">
+              <CardContent className="pt-6">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Interviewer 1 (you)</Label>
+                    <Input value={user ? `${user.email}` : ''} disabled className="h-8 text-xs" />
                   </div>
-                </CardContent>
-              </Card>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Interviewer 2 Full Name</Label>
+                    <Input value={coInterviewerName} onChange={(e) => setCoInterviewerName(e.target.value)} placeholder="Co-interviewer's name" className="h-8 text-xs" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Room</Label>
+                    <Input value={roomLabel} onChange={(e) => setRoomLabel(e.target.value)} placeholder="e.g. Room 3" className="h-8 text-xs" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
-              <Card className="glass-panel">
+            {/* One flowing document: read the prompt, see the rubric, grade everyone right there --
+                mirrors the paper/Google-Form flow so interviewers don't lose their place mid-question. */}
+            {config.sections.map((section) => (
+              <Card key={section.key} className="glass-panel">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Scoring</CardTitle>
-                  <CardDescription>Consult the guide on the left while scoring — labels here are intentionally short.</CardDescription>
+                  <CardTitle className="text-base">{section.title}</CardTitle>
                 </CardHeader>
-                <CardContent className="overflow-x-auto">
-                  <div className="min-w-[560px]">
-                    <div
-                      className="grid gap-y-1 items-end pb-2"
-                      style={{ gridTemplateColumns: `minmax(200px,1fr) repeat(${selectedApplicants.length}, minmax(150px,1fr))` }}
-                    >
-                      <span />
-                      {selectedApplicants.map((a, idx) => (
-                        <div
-                          key={a.id}
-                          className={`text-xs font-semibold truncate pb-1 pr-2 ${idx > 0 ? 'pl-4 border-l border-border' : ''}`}
-                          title={getFullName(a)}
-                        >
-                          {a.candidate_number ? `#${a.candidate_number} ` : ''}{getFullName(a)}
-                        </div>
-                      ))}
-                    </div>
-
-                    {config.sections.filter((s) => s.criteria.length > 0).map((section) => (
-                      <div key={section.key} className="mb-3">
-                        <div className="text-xs font-semibold text-muted-foreground mb-1.5 mt-2">{section.title}</div>
-                        {section.criteria.map((criterion) => (
-                          <div
-                            key={criterion.key}
-                            className="grid gap-y-1 items-center py-2 border-t border-border/60"
-                            style={{ gridTemplateColumns: `minmax(200px,1fr) repeat(${selectedApplicants.length}, minmax(150px,1fr))` }}
-                          >
-                            <span className="text-xs leading-snug pr-2">{criterion.label}</span>
-                            {selectedApplicants.map((a, idx) => {
-                              const form = forms[a.id];
-                              if (!form) return <span key={a.id} />;
-                              return (
-                                <div key={a.id} className={`space-y-1 py-1 pr-2 ${idx > 0 ? 'pl-4 border-l border-border' : ''}`}>
-                                  {criterion.variants && (
-                                    <Select
-                                      value={form.variants[criterion.key] || ''}
-                                      onValueChange={(v) => updateForm(a.id, { variants: { ...form.variants, [criterion.key]: v } })}
-                                    >
-                                      <SelectTrigger className="h-6 text-[10px] px-1.5"><SelectValue placeholder="Version..." /></SelectTrigger>
-                                      <SelectContent>
-                                        {criterion.variants.map((v, i) => (
-                                          <SelectItem key={i} value={v} className="text-xs">{v}</SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  )}
-                                  <div className="flex gap-1">
+                <CardContent className="space-y-5">
+                  {section.script && (
+                    <p className="text-sm whitespace-pre-line text-muted-foreground leading-relaxed">{section.script}</p>
+                  )}
+                  {section.criteria.map((criterion, ci) => {
+                    const sharedVariant = selectedApplicants[0] ? forms[selectedApplicants[0].id]?.variants[criterion.key] || '' : '';
+                    return (
+                      <div key={criterion.key} className={ci > 0 || section.script ? 'pt-4 border-t border-border/60 space-y-3' : 'space-y-3'}>
+                        <p className="text-sm font-medium">{criterion.label}</p>
+                        {criterion.variants && (
+                          <Select value={sharedVariant} onValueChange={(v) => setVariantForAll(criterion.key, v)}>
+                            <SelectTrigger className="text-xs max-w-md"><SelectValue placeholder="Which version was asked?" /></SelectTrigger>
+                            <SelectContent>
+                              {criterion.variants.map((v, i) => (
+                                <SelectItem key={i} value={v} className="text-xs">{v}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                        <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${selectedApplicants.length}, minmax(140px,1fr))` }}>
+                          {selectedApplicants.map((a) => {
+                            const form = forms[a.id];
+                            if (!form) return <span key={a.id} />;
+                            const value = form.scores[section.key]?.[criterion.key];
+                            return (
+                              <div key={a.id} className="space-y-1">
+                                <Label className="text-xs text-muted-foreground truncate block" title={getFullName(a)}>
+                                  {a.candidate_number ? `#${a.candidate_number} ` : ''}{getFullName(a)} — Grade
+                                </Label>
+                                <Select
+                                  value={value !== undefined ? String(value) : ''}
+                                  onValueChange={(v) => setScore(a.id, section.key, criterion.key, Number(v))}
+                                >
+                                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Grade" /></SelectTrigger>
+                                  <SelectContent>
                                     {Array.from({ length: criterion.max - criterion.min + 1 }, (_, i) => criterion.min + i).map((score) => (
-                                      <button
-                                        key={score}
-                                        type="button"
-                                        onClick={() => setScore(a.id, section.key, criterion.key, score)}
-                                        className={`flex-1 h-7 rounded border text-xs font-medium transition-colors ${
-                                          form.scores[section.key]?.[criterion.key] === score
-                                            ? 'bg-primary text-primary-foreground border-primary'
-                                            : 'hover:bg-muted/50 border-border'
-                                        }`}
-                                      >
-                                        {score}
-                                      </button>
+                                      <SelectItem key={score} value={String(score)}>{score}</SelectItem>
                                     ))}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </CardContent>
               </Card>
+            ))}
 
               <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
                 {selectedApplicants.map((a) => {
@@ -1033,7 +1000,6 @@ export default function Interview() {
                   );
                 })}
               </div>
-            </div>
           </div>
         )}
       </main>

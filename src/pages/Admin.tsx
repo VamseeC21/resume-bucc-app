@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   Loader2, Upload, Trophy, Users, FileText, ArrowLeft, Search,
-  ChevronUp, ChevronDown, Edit2, Check, X, Gamepad2, Plus, Copy, Eye, Video, User, Award, Download, Palette
+  ChevronUp, ChevronDown, Edit2, Check, X, Gamepad2, Plus, Copy, Eye, Video, User, Award, Download, Palette, ClipboardList
 } from 'lucide-react';
 import { toast } from 'sonner';
 import DeliberationBoard from '@/components/DeliberationBoard';
@@ -53,6 +53,20 @@ interface VideoGradeAuditRow {
   notes: string | null;
   graded_at: string;
   total_score?: number;
+  applicant_name?: string;
+}
+
+interface InterviewScoreAuditRow {
+  id: string;
+  application_id: string;
+  round: string;
+  co_interviewer_name: string | null;
+  room_label: string | null;
+  total_score: number;
+  recommendation: string | null;
+  overall_impression: string | null;
+  glaring_concerns: string | null;
+  submitted_at: string;
   applicant_name?: string;
 }
 
@@ -117,6 +131,14 @@ interface FinalRanking {
   video_normalized: number;
   combined_score: number;
 }
+
+const RECOMMENDATION_STYLE: Record<string, string> = {
+  yes: 'text-green-600 border-green-600',
+  juniors_yes: 'text-green-600 border-green-600',
+  maybe: 'text-amber-600 border-amber-600',
+  no: 'text-red-600 border-red-600',
+  juniors_no: 'text-red-600 border-red-600',
+};
 
 // Helper function to get full name from first/last or fallback to applicant_name
 function getFullName(app: Application): string {
@@ -208,10 +230,13 @@ export default function Admin() {
   const [selectedGrader, setSelectedGrader] = useState<string>('');
   const [comparisons, setComparisons] = useState<Comparison[]>([]);
   const [isLoadingComparisons, setIsLoadingComparisons] = useState(false);
-  const [auditVoteSubTab, setAuditVoteSubTab] = useState<'comparisons' | 'video-grades'>('comparisons');
+  const [auditVoteSubTab, setAuditVoteSubTab] = useState<'comparisons' | 'video-grades' | 'interview-scores'>('comparisons');
   const [videoGradesAudit, setVideoGradesAudit] = useState<VideoGradeAuditRow[]>([]);
   const [isLoadingVideoGradesAudit, setIsLoadingVideoGradesAudit] = useState(false);
+  const [interviewScoresAudit, setInterviewScoresAudit] = useState<InterviewScoreAuditRow[]>([]);
+  const [isLoadingInterviewScoresAudit, setIsLoadingInterviewScoresAudit] = useState(false);
   const [expandedNoteId, setExpandedNoteId] = useState<string | null>(null);
+  const [expandedImpressionId, setExpandedImpressionId] = useState<string | null>(null);
   const [expandedVideoScoreAppId, setExpandedVideoScoreAppId] = useState<string | null>(null);
   
   // Edit state
@@ -454,9 +479,16 @@ export default function Admin() {
         .select('grader_id')
         .eq('game_id', selectedGameId);
 
+      // 3) Interviewer ids from interview_scores for this game
+      const { data: interviews } = await supabase
+        .from('interview_scores')
+        .select('interviewer_id')
+        .eq('game_id', selectedGameId);
+
       const fromComps = (comps || []).map((c) => c.user_id);
       const fromGrades = (grades || []).map((g) => g.grader_id);
-      const uniqueUserIds = [...new Set([...fromComps, ...fromGrades])];
+      const fromInterviews = (interviews || []).map((i) => i.interviewer_id);
+      const uniqueUserIds = [...new Set([...fromComps, ...fromGrades, ...fromInterviews])];
 
       if (uniqueUserIds.length === 0) {
         setGraders([]);
@@ -567,6 +599,50 @@ export default function Admin() {
       setVideoGradesAudit([]);
     } finally {
       setIsLoadingVideoGradesAudit(false);
+    }
+  }, [selectedGameId]);
+
+  const fetchInterviewScoresAudit = useCallback(async (graderId: string) => {
+    if (!selectedGameId) return;
+
+    setIsLoadingInterviewScoresAudit(true);
+    try {
+      const { data: rows, error } = await supabase
+        .from('interview_scores')
+        .select('id, application_id, round, co_interviewer_name, room_label, total_score, recommendation, overall_impression, glaring_concerns, submitted_at, applications(first_name, last_name, applicant_name, candidate_number)')
+        .eq('interviewer_id', graderId)
+        .eq('game_id', selectedGameId)
+        .order('submitted_at', { ascending: false });
+
+      if (error) throw error;
+
+      const mapped: InterviewScoreAuditRow[] = (rows || []).map((r) => {
+        const app = r.applications;
+        const name = app?.first_name && app?.last_name
+          ? `${app.first_name} ${app.last_name}`.trim()
+          : (app?.first_name || app?.applicant_name || 'Unknown').trim();
+        const label = app?.candidate_number ? `#${app.candidate_number} ${name}` : name;
+        return {
+          id: r.id,
+          application_id: r.application_id,
+          round: r.round,
+          co_interviewer_name: r.co_interviewer_name,
+          room_label: r.room_label,
+          total_score: r.total_score,
+          recommendation: r.recommendation,
+          overall_impression: r.overall_impression,
+          glaring_concerns: r.glaring_concerns,
+          submitted_at: r.submitted_at,
+          applicant_name: label,
+        };
+      });
+      setInterviewScoresAudit(mapped);
+    } catch (err) {
+      console.error('Error fetching interview scores for audit:', err);
+      toast.error('Failed to load interview scores');
+      setInterviewScoresAudit([]);
+    } finally {
+      setIsLoadingInterviewScoresAudit(false);
     }
   }, [selectedGameId]);
 
@@ -690,14 +766,17 @@ export default function Admin() {
 
   useEffect(() => {
     setExpandedNoteId(null);
+    setExpandedImpressionId(null);
     if (selectedGrader) {
       fetchComparisons(selectedGrader);
       fetchVideoGradesAudit(selectedGrader);
+      fetchInterviewScoresAudit(selectedGrader);
     } else {
       setComparisons([]);
       setVideoGradesAudit([]);
+      setInterviewScoresAudit([]);
     }
-  }, [selectedGrader, fetchComparisons, fetchVideoGradesAudit]);
+  }, [selectedGrader, fetchComparisons, fetchVideoGradesAudit, fetchInterviewScoresAudit]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -1401,10 +1480,10 @@ export default function Admin() {
                   {selectedGrader && (
                     <Badge variant="secondary" className="shrink-0 gap-1.5 px-3 py-1.5 text-base font-semibold">
                       <span className="tabular-nums text-primary">
-                        {auditVoteSubTab === 'comparisons' ? comparisons.length : videoGradesAudit.length}
+                        {auditVoteSubTab === 'comparisons' ? comparisons.length : auditVoteSubTab === 'video-grades' ? videoGradesAudit.length : interviewScoresAudit.length}
                       </span>
                       <span className="font-normal text-muted-foreground">
-                        {auditVoteSubTab === 'comparisons' ? 'votes' : 'grades'}
+                        {auditVoteSubTab === 'comparisons' ? 'votes' : auditVoteSubTab === 'video-grades' ? 'grades' : 'scores'}
                       </span>
                     </Badge>
                   )}
@@ -1415,8 +1494,8 @@ export default function Admin() {
                       Select a grader from the list to view their vote history
                     </div>
                   ) : (
-                    <Tabs value={auditVoteSubTab} onValueChange={(v) => setAuditVoteSubTab(v as 'comparisons' | 'video-grades')}>
-                      <TabsList className="grid w-full grid-cols-2 max-w-xs mb-4">
+                    <Tabs value={auditVoteSubTab} onValueChange={(v) => setAuditVoteSubTab(v as 'comparisons' | 'video-grades' | 'interview-scores')}>
+                      <TabsList className="grid w-full grid-cols-3 max-w-md mb-4">
                         <TabsTrigger value="comparisons" className="flex items-center gap-2">
                           <Trophy className="w-4 h-4" />
                           Comparison votes
@@ -1424,6 +1503,10 @@ export default function Admin() {
                         <TabsTrigger value="video-grades" className="flex items-center gap-2">
                           <Video className="w-4 h-4" />
                           Video grades
+                        </TabsTrigger>
+                        <TabsTrigger value="interview-scores" className="flex items-center gap-2">
+                          <ClipboardList className="w-4 h-4" />
+                          Interview scores
                         </TabsTrigger>
                       </TabsList>
                       <TabsContent value="comparisons" className="mt-0">
@@ -1563,6 +1646,87 @@ export default function Admin() {
                                 <TableRow>
                                   <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                                     No video grades for this grader
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                            </TableBody>
+                          </Table>
+                        )}
+                      </TabsContent>
+                      <TabsContent value="interview-scores" className="mt-0">
+                        {isLoadingInterviewScoresAudit ? (
+                          <div className="flex items-center justify-center py-12">
+                            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                          </div>
+                        ) : (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Date</TableHead>
+                                <TableHead>Round</TableHead>
+                                <TableHead>Applicant</TableHead>
+                                <TableHead>Room</TableHead>
+                                <TableHead>Co-interviewer</TableHead>
+                                <TableHead>Total</TableHead>
+                                <TableHead>Rec.</TableHead>
+                                <TableHead>Notes</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {interviewScoresAudit.map((row) => {
+                                const combinedNotes = [row.overall_impression, row.glaring_concerns ? `Concerns: ${row.glaring_concerns}` : null]
+                                  .filter(Boolean)
+                                  .join('\n');
+                                const hasNotes = combinedNotes.trim().length > 0;
+                                const isLong = hasNotes && combinedNotes.length > 80;
+                                const isExpanded = expandedImpressionId === row.id;
+                                const showFull = !isLong || isExpanded;
+                                return (
+                                  <TableRow key={row.id}>
+                                    <TableCell className="text-muted-foreground">
+                                      {new Date(row.submitted_at).toLocaleString()}
+                                    </TableCell>
+                                    <TableCell>{row.round === 'R1' ? 'Round 1' : 'Round 2'}</TableCell>
+                                    <TableCell className="font-medium">{row.applicant_name ?? '—'}</TableCell>
+                                    <TableCell className="text-muted-foreground">{row.room_label || '—'}</TableCell>
+                                    <TableCell className="text-muted-foreground">{row.co_interviewer_name || '—'}</TableCell>
+                                    <TableCell className="tabular-nums">{row.total_score.toFixed(1)}</TableCell>
+                                    <TableCell>
+                                      {row.recommendation ? (
+                                        <Badge variant="outline" className={`text-xs ${RECOMMENDATION_STYLE[row.recommendation] || ''}`}>
+                                          {row.recommendation.replace('juniors_', 'Jr ')}
+                                        </Badge>
+                                      ) : '—'}
+                                    </TableCell>
+                                    <TableCell className="max-w-[280px] text-muted-foreground align-top">
+                                      {!hasNotes ? (
+                                        '—'
+                                      ) : (
+                                        <div className="space-y-1">
+                                          <span className={showFull ? 'whitespace-pre-wrap break-words' : 'line-clamp-2'}>
+                                            {showFull ? combinedNotes : combinedNotes.slice(0, 80) + '...'}
+                                          </span>
+                                          {isLong && (
+                                            <Button
+                                              type="button"
+                                              variant="ghost"
+                                              size="sm"
+                                              className="h-7 text-xs text-primary px-0 hover:bg-transparent"
+                                              onClick={() => setExpandedImpressionId(isExpanded ? null : row.id)}
+                                            >
+                                              {isExpanded ? 'Show less' : 'Show more'}
+                                            </Button>
+                                          )}
+                                        </div>
+                                      )}
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                              {interviewScoresAudit.length === 0 && (
+                                <TableRow>
+                                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                                    No interview scores for this grader
                                   </TableCell>
                                 </TableRow>
                               )}

@@ -15,6 +15,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Loader2, GripVertical, ChevronDown, ChevronUp, Sparkles,
   Download, X, FileText, Video,
@@ -205,6 +207,28 @@ function interviewRowTemplate(sectionCount: number): string {
   return `32px 24px 24px 60px minmax(140px,1fr) 60px 70px 60px 90px repeat(${sectionCount}, 70px) 70px 140px minmax(140px,1fr) minmax(140px,1fr) 60px 70px 50px 50px 32px`;
 }
 
+// Truncated cell that expands into a popover on click so long grader lists /
+// comments can be read in full during deliberation without leaving the row.
+function ExpandableText({ label, value }: { label: string; value: string }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="text-xs text-muted-foreground truncate text-left w-full hover:text-foreground hover:underline decoration-dotted underline-offset-2"
+          title={value}
+        >
+          {value || '—'}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-96 max-h-80 overflow-y-auto" align="start">
+        <p className="text-xs font-semibold text-muted-foreground mb-1.5">{label}</p>
+        <p className="text-sm whitespace-pre-wrap">{value || '—'}</p>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function SortableRow({
   row, round, sectionKeys, gridTemplate, position, selected, onToggleSelect, expanded, onToggleExpand,
   onViewResume, onNotesChange, onNotesSave,
@@ -236,16 +260,29 @@ function SortableRow({
   const isResume = round === 'RESUME';
 
   const notesInput = (
-    <input
-      type="text"
-      value={row.notes ?? ''}
-      onChange={(e) => onNotesChange(row.round_candidate_id, e.target.value)}
-      onBlur={(e) => onNotesSave(row.round_candidate_id, e.target.value)}
-      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-      placeholder="Add a note…"
-      title={row.notes || ''}
-      className="w-full bg-transparent border-0 border-b border-dashed border-transparent hover:border-border focus:border-primary focus:outline-none text-xs px-1 py-0.5 truncate"
-    />
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="w-full text-left text-xs px-1 py-0.5 truncate rounded hover:bg-muted/50"
+          title={row.notes || ''}
+        >
+          {row.notes ? row.notes : <span className="text-muted-foreground">Add a note…</span>}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-80" align="start">
+        <p className="text-xs font-semibold text-muted-foreground mb-1.5">Note</p>
+        <Textarea
+          autoFocus
+          value={row.notes ?? ''}
+          onChange={(e) => onNotesChange(row.round_candidate_id, e.target.value)}
+          onBlur={(e) => onNotesSave(row.round_candidate_id, e.target.value)}
+          placeholder="Add a note…"
+          rows={4}
+          className="text-sm"
+        />
+      </PopoverContent>
+    </Popover>
   );
 
   if (isResume) {
@@ -342,8 +379,8 @@ function SortableRow({
           <span className="text-right font-semibold tabular-nums">
             {total.value !== null ? total.value.toFixed(1) : '—'}
           </span>
-          <span className="text-xs text-muted-foreground truncate" title={graders}>{graders}</span>
-          <span className="text-xs text-muted-foreground truncate" title={comments}>{comments || '—'}</span>
+          <ExpandableText label="Graders" value={graders} />
+          <ExpandableText label="Comments" value={comments} />
           {notesInput}
           <span className="flex gap-1">
             {row.video_youtube_url && (
