@@ -449,13 +449,16 @@ export default function Interview() {
     setIsLoading(true);
     setError(null);
     try {
-      const { data: apps, error: appsError } = await supabase
-        .from('applications')
-        .select('id, candidate_number, first_name, last_name, applicant_name, applicant_email, year, major, resume_id')
-        .eq('game_id', currentGameId)
-        .order('candidate_number', { ascending: true });
-
+      // Only candidates within the "advance top N" cutoff set on the prior
+      // round's deliberation board are eligible here -- e.g. R2 only shows
+      // people who were actually passed out of R1, not every applicant.
+      const { data: rosterData, error: appsError } = await supabase.rpc('get_interview_roster', {
+        p_game_id: currentGameId,
+        p_round: round,
+      });
       if (appsError) throw appsError;
+      const apps = rosterData as unknown as Omit<Applicant, 'score_count' | 'scored_by_me'>[] | { error: string };
+      if (!Array.isArray(apps)) throw new Error(apps.error || 'Failed to load candidates');
 
       const { data: roundScores, error: scoresError } = await supabase
         .from('interview_scores')
@@ -472,7 +475,7 @@ export default function Interview() {
         if (s.interviewer_id === user.id) mineByApp.add(s.application_id);
       });
 
-      setApplicants((apps || []).map((a) => ({
+      setApplicants(apps.map((a) => ({
         ...a,
         score_count: countByApp.get(a.id) || 0,
         scored_by_me: mineByApp.has(a.id),
@@ -761,8 +764,12 @@ export default function Interview() {
             <Card className="glass-panel">
               <CardContent className="pt-6 text-center py-12">
                 <Users className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-                <h3 className="text-lg font-semibold mb-2">No Applicants Yet</h3>
-                <p className="text-muted-foreground">There are no applicants for this period yet.</p>
+                <h3 className="text-lg font-semibold mb-2">No Candidates Yet</h3>
+                <p className="text-muted-foreground">
+                  {round === 'R1'
+                    ? 'No "advance top N" cutoff has been set on the Resume deliberation board yet.'
+                    : 'No "advance top N" cutoff has been set on the Round 1 deliberation board yet.'}
+                </p>
               </CardContent>
             </Card>
           ) : (

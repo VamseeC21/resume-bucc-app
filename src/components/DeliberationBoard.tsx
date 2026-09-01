@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Fragment, useState, useEffect, useCallback, useMemo } from 'react';
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor,
   useSensor, useSensors, DragEndEvent,
@@ -12,6 +12,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -289,7 +290,7 @@ function SortableRow({
     return (
       <div ref={setNodeRef} style={style} className="rounded-lg border border-border overflow-hidden bg-card">
         <div
-          className="grid items-center gap-2 px-2 py-2 text-sm overflow-x-auto"
+          className="grid items-center gap-1.5 px-2 py-1 text-xs overflow-x-auto"
           style={{
             gridTemplateColumns: gridTemplate,
             ...(hex ? { borderLeft: `6px solid ${hex}`, backgroundColor: `${hex}14` } : { borderLeft: '6px solid transparent' }),
@@ -297,7 +298,7 @@ function SortableRow({
         >
           <span className="text-xs text-muted-foreground text-center tabular-nums select-none" title="Position in current order">{position}</span>
           <button type="button" className="cursor-grab active:cursor-grabbing text-muted-foreground touch-none" {...attributes} {...listeners} aria-label="Drag to reorder">
-            <GripVertical className="w-4 h-4" />
+            <GripVertical className="w-3.5 h-3.5" />
           </button>
           <Checkbox checked={selected} onCheckedChange={() => onToggleSelect(row.round_candidate_id)} aria-label={`Select ${fullName(row)}`} />
           <span className="text-xs text-muted-foreground tabular-nums">{row.candidate_number ? `#${row.candidate_number}` : '—'}</span>
@@ -348,7 +349,7 @@ function SortableRow({
     <div ref={setNodeRef} style={style} className="rounded-lg border border-border overflow-hidden bg-card">
       <Collapsible open={expanded} onOpenChange={() => onToggleExpand(row.round_candidate_id)}>
         <div
-          className="grid items-center gap-2 px-2 py-2 text-sm overflow-x-auto"
+          className="grid items-center gap-1.5 px-2 py-1 text-xs overflow-x-auto"
           style={{
             gridTemplateColumns: gridTemplate,
             ...(hex ? { borderLeft: `6px solid ${hex}`, backgroundColor: `${hex}14` } : { borderLeft: '6px solid transparent' }),
@@ -356,7 +357,7 @@ function SortableRow({
         >
           <span className="text-xs text-muted-foreground text-center tabular-nums select-none" title="Position in current order">{position}</span>
           <button type="button" className="cursor-grab active:cursor-grabbing text-muted-foreground touch-none" {...attributes} {...listeners} aria-label="Drag to reorder">
-            <GripVertical className="w-4 h-4" />
+            <GripVertical className="w-3.5 h-3.5" />
           </button>
           <Checkbox checked={selected} onCheckedChange={() => onToggleSelect(row.round_candidate_id)} aria-label={`Select ${fullName(row)}`} />
           <span className="text-xs text-muted-foreground tabular-nums">{row.candidate_number ? `#${row.candidate_number}` : '—'}</span>
@@ -478,6 +479,8 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [sortState, setSortState] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+  const [advanceCounts, setAdvanceCounts] = useState<Record<Round, number | null>>({ RESUME: null, R1: null, R2: null });
+  const [advanceDraft, setAdvanceDraft] = useState('');
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -488,6 +491,17 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
     setIsLoading(true);
     setSelectedIds(new Set());
     try {
+      // Check this BEFORE seeding, so "fresh round" means "nobody has ever
+      // opened this round's board before" -- not "no new candidates showed
+      // up since last time," which would re-trigger the default sort (and
+      // wipe out manual reordering) on every subsequent visit.
+      const { count: existingCount } = await supabase
+        .from('round_candidates')
+        .select('id', { count: 'exact', head: true })
+        .eq('game_id', gameId)
+        .eq('round', round);
+      const isFreshRound = !existingCount;
+
       await supabase.rpc('seed_round_candidates', { p_game_id: gameId, p_round: round });
       const rpcName = round === 'RESUME' ? 'get_resume_deliberation' : 'get_round_deliberation';
       const rpcParams = round === 'RESUME' ? { p_game_id: gameId } : { p_game_id: gameId, p_round: round };
@@ -496,18 +510,29 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
       const result = data as unknown as DeliberationRow[] | { error: string };
       if (!Array.isArray(result)) throw new Error(result.error || 'Failed to load deliberation data');
 
-      // Always come in sorted by score, highest first, so no manual step is
-      // needed to see the ranking that actually matters for deliberation.
-      const sorted = sortRowsByValue(result, (r) => scoreValueFor(r, round), 'desc');
-      setRows(sorted);
-      setSortState({ key: 'score', dir: 'desc' });
+      if (isFreshRound) {
+        // First time this round has ever been opened: sort by score once so
+        // there's something useful to look at. After this, order is
+        // whatever the committee leaves it in (drag, or an explicit sort
+        // click) -- this branch only fires when there was nothing yet to
+        // preserve.
+        const sorted = sortRowsByValue(result, (r) => scoreValueFor(r, round), 'desc');
+        setRows(sorted);
+        setSortState({ key: 'score', dir: 'desc' });
 
-      if (sorted.length > 1) {
-        supabase.rpc('reorder_round_candidates', {
-          p_updates: sorted.map((r) => ({ id: r.round_candidate_id, sort_order: r.sort_order })),
-        }).then(({ error: reorderError }) => {
-          if (reorderError) console.error('Error persisting default score order:', reorderError);
-        });
+        if (sorted.length > 1) {
+          supabase.rpc('reorder_round_candidates', {
+            p_updates: sorted.map((r) => ({ id: r.round_candidate_id, sort_order: r.sort_order })),
+          }).then(({ error: reorderError }) => {
+            if (reorderError) console.error('Error persisting default score order:', reorderError);
+          });
+        }
+      } else {
+        // Rows already come back ordered by the persisted sort_order (see
+        // get_*_deliberation) -- respect whatever order the committee last
+        // left it in instead of silently re-ranking on every visit.
+        setRows(result);
+        setSortState(null);
       }
     } catch (err) {
       console.error('Error loading deliberation data:', err);
@@ -518,6 +543,51 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
   }, [gameId, round]);
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
+
+  const fetchCutoffs = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.rpc('get_round_cutoffs', { p_game_id: gameId });
+      if (error) throw error;
+      const result = data as unknown as Record<string, number | null> | { error: string };
+      if (result && 'error' in result) throw new Error(result.error);
+      setAdvanceCounts({ RESUME: result.RESUME ?? null, R1: result.R1 ?? null, R2: result.R2 ?? null });
+    } catch (err) {
+      console.error('Error fetching advance cutoffs:', err);
+    }
+  }, [gameId]);
+
+  useEffect(() => { fetchCutoffs(); }, [fetchCutoffs]);
+
+  // Keep the input in sync with whichever round's tab is active, and with
+  // whatever the last confirmed save landed on.
+  useEffect(() => {
+    setAdvanceDraft(advanceCounts[round] != null ? String(advanceCounts[round]) : '');
+  }, [round, advanceCounts]);
+
+  const saveAdvanceCount = async (value: number | null) => {
+    const previous = advanceCounts[round];
+    if (previous === value) return;
+    setAdvanceCounts((prev) => ({ ...prev, [round]: value }));
+    try {
+      const { error } = await supabase.rpc('set_round_advance_count', {
+        p_game_id: gameId, p_round: round, p_count: value,
+      });
+      if (error) throw error;
+      toast.success(value === null ? `Cleared the advance cutoff for ${ROUND_LABEL[round]}` : `Top ${value} will advance from ${ROUND_LABEL[round]}`);
+    } catch (err) {
+      console.error('Error saving advance cutoff:', err);
+      toast.error('Failed to save advance cutoff — refreshing');
+      setAdvanceCounts((prev) => ({ ...prev, [round]: previous }));
+    }
+  };
+
+  const commitAdvanceDraft = () => {
+    const trimmed = advanceDraft.trim();
+    if (trimmed === '') { saveAdvanceCount(null); return; }
+    const parsed = Math.max(0, parseInt(trimmed, 10));
+    if (Number.isNaN(parsed)) { setAdvanceDraft(advanceCounts[round] != null ? String(advanceCounts[round]) : ''); return; }
+    saveAdvanceCount(parsed);
+  };
 
   const sectionKeys = useMemo(() => (round === 'RESUME' ? [] : sectionKeysFor(rows)), [rows, round]);
 
@@ -747,11 +817,28 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
         <CardHeader>
           <CardTitle>Deliberation — {ROUND_LABEL[round]}</CardTitle>
           <CardDescription>
-            Sorted by score by default — drag to reorder or click a column header to re-sort, select multiple candidates and assign a color, click Notes to type inline. {gameName}
+            Sorted by score by default — drag to reorder or click a column header to re-sort, select multiple candidates and assign a color, click Notes to type inline. The top N set below advance to the next round. {gameName}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center gap-3 mb-4 flex-wrap">
+          <div className="sticky top-16 z-30 -mx-6 px-6 py-3 mb-4 bg-card/95 backdrop-blur-sm border-b border-border flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <label htmlFor="advance-count" className="text-sm text-muted-foreground whitespace-nowrap">Advance top</label>
+              <Input
+                id="advance-count"
+                type="number"
+                min={0}
+                max={rows.length}
+                value={advanceDraft}
+                onChange={(e) => setAdvanceDraft(e.target.value)}
+                onBlur={commitAdvanceDraft}
+                onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                placeholder="—"
+                className="h-8 w-16 text-sm"
+              />
+              <span className="text-sm text-muted-foreground whitespace-nowrap">of {rows.length}</span>
+            </div>
+            <div className="h-5 w-px bg-border" />
             <span className="text-sm font-medium">{rows.length} candidate{rows.length === 1 ? '' : 's'}</span>
             <span className="text-sm text-muted-foreground">{selectedIds.size} selected</span>
             <Button variant="ghost" size="sm" onClick={selectAll}>Select all</Button>
@@ -788,7 +875,7 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
           ) : (
             <div className="overflow-x-auto">
               <div
-                className="grid gap-2 px-2 pb-2 text-xs font-medium text-muted-foreground min-w-max"
+                className="grid gap-1.5 px-2 pb-1.5 text-xs font-medium text-muted-foreground min-w-max"
                 style={{ gridTemplateColumns: gridTemplate }}
               >
                 <span className="text-center" title="Position in current order">#</span>
@@ -821,24 +908,37 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
               </div>
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
                 <SortableContext items={rowIds} strategy={verticalListSortingStrategy}>
-                  <div className="space-y-2 min-w-max">
-                    {rows.map((row, index) => (
-                      <SortableRow
-                        key={row.round_candidate_id}
-                        row={row}
-                        round={round}
-                        sectionKeys={sectionKeys}
-                        gridTemplate={gridTemplate}
-                        position={index + 1}
-                        selected={selectedIds.has(row.round_candidate_id)}
-                        onToggleSelect={toggleSelect}
-                        expanded={expandedId === row.round_candidate_id}
-                        onToggleExpand={(id) => setExpandedId((prev) => (prev === id ? null : id))}
-                        onViewResume={viewResume}
-                        onNotesChange={updateNotesLocal}
-                        onNotesSave={saveNotes}
-                      />
-                    ))}
+                  <div className="space-y-1 min-w-max">
+                    {(() => {
+                      const cutoff = advanceCounts[round];
+                      return rows.map((row, index) => (
+                        <Fragment key={row.round_candidate_id}>
+                          {cutoff !== null && cutoff > 0 && cutoff < rows.length && index === cutoff && (
+                            <div className="flex items-center gap-2 py-1 text-[11px] font-medium text-muted-foreground select-none">
+                              <div className="flex-1 border-t border-dashed border-border" />
+                              top {cutoff} advance
+                              <div className="flex-1 border-t border-dashed border-border" />
+                            </div>
+                          )}
+                          <div className={cutoff !== null && index >= cutoff ? 'opacity-50' : undefined}>
+                            <SortableRow
+                              row={row}
+                              round={round}
+                              sectionKeys={sectionKeys}
+                              gridTemplate={gridTemplate}
+                              position={index + 1}
+                              selected={selectedIds.has(row.round_candidate_id)}
+                              onToggleSelect={toggleSelect}
+                              expanded={expandedId === row.round_candidate_id}
+                              onToggleExpand={(id) => setExpandedId((prev) => (prev === id ? null : id))}
+                              onViewResume={viewResume}
+                              onNotesChange={updateNotesLocal}
+                              onNotesSave={saveNotes}
+                            />
+                          </div>
+                        </Fragment>
+                      ));
+                    })()}
                   </div>
                 </SortableContext>
               </DndContext>
