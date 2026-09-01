@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Loader2, LogOut, Settings, Trophy, Users, FileText, CheckCircle2, Search, ArrowLeft, Upload, Phone, Eye } from 'lucide-react';
 import { toast } from 'sonner';
@@ -382,6 +382,18 @@ const emptyForm = (): CandidateFormState => ({
   presentationFile: null, isSubmitting: false, isSubmitted: false, resumeUrl: null,
 });
 
+// Everything except the file upload (not serializable) and transient
+// submit/URL state (recomputed on restore) gets autosaved so a reload mid-
+// interview doesn't lose scores/notes already typed in.
+type DraftFormState = Omit<CandidateFormState, 'presentationFile' | 'isSubmitting' | 'isSubmitted' | 'resumeUrl'>;
+interface InterviewDraft {
+  selectedIds: string[];
+  coInterviewerName: string;
+  roomLabel: string;
+  forms: Record<string, DraftFormState>;
+}
+const draftKey = (gameId: string, round: Round) => `bucc-interview-draft:${gameId}:${round}`;
+
 function getFullName(app: Applicant): string {
   if (app.first_name && app.last_name) return `${app.first_name} ${app.last_name}`.trim();
   if (app.first_name) return app.first_name.trim();
@@ -393,6 +405,28 @@ const criterionMap = (config: RoundConfig) => {
   config.sections.forEach((s) => s.criteria.forEach((c) => map.set(c.key, { sectionKey: s.key, criterion: c })));
   return map;
 };
+
+// [READ] paragraphs are what the interviewer actually says out loud -- make
+// those stand out from the surrounding scoring guide/guideline text, which
+// stays muted since it's reference material, not something to read verbatim.
+function ScriptText({ script }: { script: string }) {
+  return (
+    <>
+      {script.split('\n\n').map((paragraph, i) => (
+        <p
+          key={i}
+          className={
+            paragraph.trimStart().startsWith('[READ]')
+              ? 'text-sm whitespace-pre-line text-foreground font-medium leading-relaxed'
+              : 'text-sm whitespace-pre-line text-muted-foreground leading-relaxed'
+          }
+        >
+          {paragraph}
+        </p>
+      ))}
+    </>
+  );
+}
 
 export default function Interview() {
   const { user, loading: authLoading, signOut, isAdmin } = useAuth();
@@ -533,15 +567,11 @@ export default function Interview() {
     else toggleSelect(a.id);
   };
 
-  const startGrading = async () => {
-    const initial: Record<string, CandidateFormState> = {};
-    for (const id of selectedIds) {
-      initial[id] = emptyForm();
-    }
-    setForms(initial);
-    setGrading(true);
-
-    for (const applicant of applicants.filter((a) => selectedIds.includes(a.id))) {
+  // Shared by a fresh "Grade Selected" click and by restoring a draft after
+  // a reload -- both need resume signed URLs for whichever applicants ended
+  // up in the grading view.
+  const fetchResumeUrls = useCallback(async (ids: string[]) => {
+    for (const applicant of applicants.filter((a) => ids.includes(a.id))) {
       if (!applicant.resume_id) continue;
       const { data: resume } = await supabase.from('resumes').select('pdf_path').eq('id', applicant.resume_id).maybeSingle();
       if (resume?.pdf_path) {
@@ -549,7 +579,81 @@ export default function Interview() {
         if (signed) setForms((prev) => ({ ...prev, [applicant.id]: { ...prev[applicant.id], resumeUrl: signed.signedUrl } }));
       }
     }
+  }, [applicants]);
+
+  const startGrading = async () => {
+    const initial: Record<string, CandidateFormState> = {};
+    for (const id of selectedIds) {
+      initial[id] = emptyForm();
+    }
+    setForms(initial);
+    setGrading(true);
+    await fetchResumeUrls(selectedIds);
   };
+
+  // Restore an in-progress draft (scores, notes, dropdowns -- everything but
+  // the file upload) once per game+round, the first time the roster for
+  // that round is available. Covers both an accidental page reload and just
+  // switching round tabs and back within the same session.
+  const restoredDraftKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentGameId || isLoading || grading) return;
+    const key = draftKey(currentGameId, round);
+    if (restoredDraftKey.current === key) return;
+    restoredDraftKey.current = key;
+
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    try {
+      const draft = JSON.parse(raw) as InterviewDraft;
+      const validIds = (draft.selectedIds || []).filter((id) => applicants.some((a) => a.id === id));
+      if (validIds.length === 0) { localStorage.removeItem(key); return; }
+
+      const restored: Record<string, CandidateFormState> = {};
+      for (const id of validIds) {
+        restored[id] = { ...emptyForm(), ...draft.forms[id] };
+      }
+      setSelectedIds(validIds);
+      setCoInterviewerName(draft.coInterviewerName || '');
+      setRoomLabel(draft.roomLabel || '');
+      setForms(restored);
+      setGrading(true);
+      toast.info('Restored your in-progress scoring from before the reload');
+      fetchResumeUrls(validIds);
+    } catch (err) {
+      console.error('Failed to restore interview draft:', err);
+      localStorage.removeItem(key);
+    }
+  }, [currentGameId, round, isLoading, grading, applicants, fetchResumeUrls]);
+
+  // Debounced autosave while actively grading. Submitted candidates drop out
+  // of what gets written so the draft naturally shrinks to nothing once
+  // everyone selected has been submitted.
+  useEffect(() => {
+    if (!grading || !currentGameId) return;
+    const timeout = setTimeout(() => {
+      const serializableForms: Record<string, DraftFormState> = {};
+      const liveIds: string[] = [];
+      for (const [id, f] of Object.entries(forms)) {
+        if (f.isSubmitted) continue;
+        const { presentationFile: _file, isSubmitting: _submitting, isSubmitted: _submitted, resumeUrl: _url, ...rest } = f;
+        serializableForms[id] = rest;
+        liveIds.push(id);
+      }
+      const key = draftKey(currentGameId, round);
+      if (liveIds.length === 0) {
+        localStorage.removeItem(key);
+        return;
+      }
+      const payload: InterviewDraft = { selectedIds: liveIds, coInterviewerName, roomLabel, forms: serializableForms };
+      try {
+        localStorage.setItem(key, JSON.stringify(payload));
+      } catch (err) {
+        console.error('Failed to autosave interview draft:', err);
+      }
+    }, 500);
+    return () => clearTimeout(timeout);
+  }, [grading, currentGameId, round, forms, coInterviewerName, roomLabel]);
 
   const updateForm = (applicantId: string, patch: Partial<CandidateFormState>) => {
     setForms((prev) => ({ ...prev, [applicantId]: { ...prev[applicantId], ...patch } }));
@@ -654,6 +758,18 @@ export default function Interview() {
   };
 
   const selectedApplicants = applicants.filter((a) => selectedIds.includes(a.id));
+
+  // Which candidate's notes tab is showing on the RHS. Falls back to the
+  // first selected candidate whenever the current one isn't in the
+  // selection anymore (grading just started, or a restored draft loaded).
+  const [activeNoteId, setActiveNoteId] = useState('');
+  useEffect(() => {
+    if (selectedApplicants.length === 0) return;
+    if (!selectedApplicants.some((a) => a.id === activeNoteId)) {
+      setActiveNoteId(selectedApplicants[0].id);
+    }
+  }, [selectedApplicants, activeNoteId]);
+
   const scoredByMeCount = applicants.filter((a) => a.scored_by_me).length;
   const incompleteApplicants = selectedApplicants.filter((a) => !isFormComplete(a));
   const allReadyToSubmit = selectedApplicants.length > 0 && incompleteApplicants.length === 0;
@@ -728,7 +844,7 @@ export default function Interview() {
         </div>
       </header>
 
-      <main className={grading ? 'w-full max-w-5xl mx-auto px-4 py-6' : 'container mx-auto px-4 py-8'}>
+      <main className={grading ? 'w-full max-w-6xl mx-auto px-4 py-6' : 'container mx-auto px-4 py-8'}>
         <div className="mb-4 flex items-center justify-between flex-wrap gap-3">
           <Tabs value={round} onValueChange={(v) => { setRound(v as Round); setSelectedIds([]); setGrading(false); }}>
             <TabsList>
@@ -840,7 +956,9 @@ export default function Interview() {
             </Card>
           )
         ) : (
-          <div className="max-w-3xl mx-auto space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 items-start">
+          {/* LHS: the chronological prompt -> rubric -> grade flow, scrolls independently of the notes panel */}
+          <div className="space-y-4 min-w-0 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:pr-1">
             <Card className="glass-panel">
               <CardContent className="pt-6">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -868,9 +986,7 @@ export default function Interview() {
                   <CardTitle className="text-base">{section.title}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-5">
-                  {section.script && (
-                    <p className="text-sm whitespace-pre-line text-muted-foreground leading-relaxed">{section.script}</p>
-                  )}
+                  {section.script && <ScriptText script={section.script} />}
                   {section.criteria.map((criterion, ci) => {
                     const sharedVariant = selectedApplicants[0] ? forms[selectedApplicants[0].id]?.variants[criterion.key] || '' : '';
                     return (
@@ -982,13 +1098,6 @@ export default function Interview() {
                           </Select>
                         </div>
 
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">
-                            Overall impression / notes {form.recommendation === 'maybe' && <span className="text-amber-600">(be detailed if Maybe)</span>}
-                          </Label>
-                          <Textarea value={form.overallImpression} onChange={(e) => updateForm(a.id, { overallImpression: e.target.value })} rows={3} className="text-xs" />
-                        </div>
-
                         {form.isSubmitting ? (
                           <p className="text-xs text-muted-foreground flex items-center gap-1">
                             <Loader2 className="w-3 h-3 animate-spin" /> Submitting…
@@ -1007,6 +1116,47 @@ export default function Interview() {
                   );
                 })}
               </div>
+          </div>
+
+          {/* RHS: personal notepad, one tab per candidate -- stays visible
+              while the LHS flow scrolls. Each interviewer's own form/notes;
+              not shared/collaborative. */}
+          <div className="lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto min-w-0 lg:pr-1">
+            <Card className="glass-panel">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">Notes</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Tabs value={activeNoteId} onValueChange={setActiveNoteId}>
+                  <TabsList className="w-full h-auto flex-wrap gap-1 bg-transparent p-0 justify-start">
+                    {selectedApplicants.map((a) => (
+                      <TabsTrigger key={a.id} value={a.id} className="text-xs max-w-[110px] truncate">
+                        {getFullName(a)}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                  {selectedApplicants.map((a) => {
+                    const form = forms[a.id];
+                    if (!form) return null;
+                    return (
+                      <TabsContent key={a.id} value={a.id} className="mt-3 space-y-1.5">
+                        {form.recommendation === 'maybe' && (
+                          <p className="text-amber-600 text-[10px] font-medium">Be detailed</p>
+                        )}
+                        <Textarea
+                          value={form.overallImpression}
+                          onChange={(e) => updateForm(a.id, { overallImpression: e.target.value })}
+                          rows={20}
+                          className="text-xs"
+                          placeholder="Notes…"
+                        />
+                      </TabsContent>
+                    );
+                  })}
+                </Tabs>
+              </CardContent>
+            </Card>
+          </div>
           </div>
         )}
       </main>

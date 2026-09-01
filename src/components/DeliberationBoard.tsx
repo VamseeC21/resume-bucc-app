@@ -15,7 +15,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -202,12 +201,6 @@ function sortRowsByValue(rows: DeliberationRow[], getValue: (r: DeliberationRow)
   return indexed.map(({ r }, i) => ({ ...r, sort_order: i }));
 }
 
-const RESUME_ROW_TEMPLATE = '32px 24px 24px 60px minmax(160px,1fr) 60px minmax(90px,1fr) 60px 90px 90px 90px minmax(140px,1fr) 90px';
-
-function interviewRowTemplate(sectionCount: number): string {
-  return `32px 24px 24px 60px minmax(140px,1fr) 60px 70px 60px 90px repeat(${sectionCount}, 70px) 70px 140px minmax(140px,1fr) minmax(140px,1fr) 60px 70px 50px 50px 32px`;
-}
-
 // Truncated cell that expands into a popover on click so long grader lists /
 // comments can be read in full during deliberation without leaving the row.
 function ExpandableText({ label, value }: { label: string; value: string }) {
@@ -230,22 +223,61 @@ function ExpandableText({ label, value }: { label: string; value: string }) {
   );
 }
 
+// Same click-to-expand pattern as ExpandableText, but keeps each grader's
+// comment attributed to them instead of flattening everyone into one
+// '|'-joined string -- easier to tell who said what during deliberation.
+function CommentsCell({ scores }: { scores: ScoreDetail[] }) {
+  const withComments = (scores || []).filter((s) => s.overall_impression);
+  const preview = withComments.map((s) => s.overall_impression).join(' | ');
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="text-xs text-muted-foreground truncate text-left w-full hover:text-foreground hover:underline decoration-dotted underline-offset-2"
+          title={preview}
+        >
+          {preview || '—'}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-96 max-h-80 overflow-y-auto" align="start">
+        <p className="text-xs font-semibold text-muted-foreground mb-1.5">Comments</p>
+        {withComments.length === 0 ? (
+          <p className="text-sm text-muted-foreground">—</p>
+        ) : (
+          <div className="space-y-2.5">
+            {withComments.map((s, i) => (
+              <div key={i}>
+                <p className="text-xs font-medium">
+                  {[s.interviewer_name, s.co_interviewer_name].filter(Boolean).join(', ')}
+                  {s.room_label ? ` — ${s.room_label}` : ''}
+                </p>
+                <p className="text-sm whitespace-pre-wrap">{s.overall_impression}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function SortableRow({
-  row, round, sectionKeys, gridTemplate, position, selected, onToggleSelect, expanded, onToggleExpand,
-  onViewResume, onNotesChange, onNotesSave,
+  row, round, sectionKeys, position, selected, onToggleSelect, expanded, onToggleExpand,
+  onViewResume, onNotesChange, onNotesSave, dimmed,
 }: {
   row: DeliberationRow;
   round: Round;
   sectionKeys: string[];
-  gridTemplate: string;
   position: number;
   selected: boolean;
-  onToggleSelect: (id: string) => void;
+  onToggleSelect: (id: string, shiftKey?: boolean) => void;
   expanded: boolean;
   onToggleExpand: (id: string) => void;
   onViewResume: (resumeId: string) => void;
   onNotesChange: (id: string, notes: string) => void;
   onNotesSave: (id: string, notes: string) => void;
+  dimmed?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: row.round_candidate_id });
 
@@ -288,33 +320,42 @@ function SortableRow({
 
   if (isResume) {
     return (
-      <div ref={setNodeRef} style={style} className="rounded-lg border border-border overflow-hidden bg-card">
-        <div
-          className="grid items-center gap-1.5 px-2 py-1 text-xs overflow-x-auto"
-          style={{
-            gridTemplateColumns: gridTemplate,
-            ...(hex ? { borderLeft: `6px solid ${hex}`, backgroundColor: `${hex}14` } : { borderLeft: '6px solid transparent' }),
-          }}
-        >
-          <span className="text-xs text-muted-foreground text-center tabular-nums select-none" title="Position in current order">{position}</span>
+      <tr ref={setNodeRef} style={{ ...style, backgroundColor: hex ? `${hex}14` : undefined }} className={`border-b border-border text-xs align-middle ${dimmed ? 'opacity-50' : ''}`}>
+        <td className="px-2 py-1 text-center tabular-nums select-none text-muted-foreground" style={{ borderLeft: hex ? `6px solid ${hex}` : '6px solid transparent' }} title="Position in current order">
+          {position}
+        </td>
+        <td className="px-1 py-1">
           <button type="button" className="cursor-grab active:cursor-grabbing text-muted-foreground touch-none" {...attributes} {...listeners} aria-label="Drag to reorder">
             <GripVertical className="w-3.5 h-3.5" />
           </button>
+        </td>
+        <td
+          className="px-1 py-1"
+          onClickCapture={(e) => {
+            if (e.shiftKey) {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggleSelect(row.round_candidate_id, true);
+            }
+          }}
+        >
           <Checkbox checked={selected} onCheckedChange={() => onToggleSelect(row.round_candidate_id)} aria-label={`Select ${fullName(row)}`} />
-          <span className="text-xs text-muted-foreground tabular-nums">{row.candidate_number ? `#${row.candidate_number}` : '—'}</span>
-          <span className="font-medium truncate" title={fullName(row)}>{fullName(row)}</span>
-          <span className="text-xs text-muted-foreground">{row.year?.slice(0, 4)}</span>
-          <span className="text-xs text-muted-foreground truncate" title={row.major || ''}>{row.major || '—'}</span>
-          <span className="text-xs text-muted-foreground">{row.gender || '—'}</span>
-          {categories.map((c) => (
-            <span key={c.key} className="text-xs text-right tabular-nums" title={c.title}>
-              {c.value !== null ? c.value.toFixed(1) : '—'}
-            </span>
-          ))}
-          <span className="text-right font-semibold tabular-nums">
-            {total.value !== null ? total.value.toFixed(1) : '—'}
-          </span>
-          {notesInput}
+        </td>
+        <td className="px-2 py-1 tabular-nums text-muted-foreground whitespace-nowrap">{row.candidate_number ? `#${row.candidate_number}` : '—'}</td>
+        <td className="px-2 py-1 font-medium max-w-[220px] truncate" title={fullName(row)}>{fullName(row)}</td>
+        <td className="px-2 py-1 text-muted-foreground whitespace-nowrap">{row.year?.slice(0, 4)}</td>
+        <td className="px-2 py-1 text-muted-foreground max-w-[160px] truncate" title={row.major || ''}>{row.major || '—'}</td>
+        <td className="px-2 py-1 text-muted-foreground whitespace-nowrap">{row.gender || '—'}</td>
+        {categories.map((c) => (
+          <td key={c.key} className="px-2 py-1 text-right tabular-nums" title={c.title}>
+            {c.value !== null ? c.value.toFixed(1) : '—'}
+          </td>
+        ))}
+        <td className="px-2 py-1 text-right font-semibold tabular-nums">
+          {total.value !== null ? total.value.toFixed(1) : '—'}
+        </td>
+        <td className="px-2 py-1 max-w-[220px]">{notesInput}</td>
+        <td className="px-2 py-1">
           <span className="flex items-center gap-1">
             {row.video_question_2_choice && (
               <Badge
@@ -336,53 +377,64 @@ function SortableRow({
               </button>
             )}
           </span>
-        </div>
-      </div>
+        </td>
+      </tr>
     );
   }
 
   const graders = gradersFor(row);
   const recommendations = recommendationsFor(row);
-  const comments = commentsFor(row);
+  const colCount = 18 + sectionKeys.length;
 
   return (
-    <div ref={setNodeRef} style={style} className="rounded-lg border border-border overflow-hidden bg-card">
-      <Collapsible open={expanded} onOpenChange={() => onToggleExpand(row.round_candidate_id)}>
-        <div
-          className="grid items-center gap-1.5 px-2 py-1 text-xs overflow-x-auto"
-          style={{
-            gridTemplateColumns: gridTemplate,
-            ...(hex ? { borderLeft: `6px solid ${hex}`, backgroundColor: `${hex}14` } : { borderLeft: '6px solid transparent' }),
-          }}
-        >
-          <span className="text-xs text-muted-foreground text-center tabular-nums select-none" title="Position in current order">{position}</span>
+    <>
+      <tr ref={setNodeRef} style={{ ...style, backgroundColor: hex ? `${hex}14` : undefined }} className={`border-b border-border text-xs align-middle ${dimmed ? 'opacity-50' : ''}`}>
+        <td className="px-2 py-1 text-center tabular-nums select-none text-muted-foreground" style={{ borderLeft: hex ? `6px solid ${hex}` : '6px solid transparent' }} title="Position in current order">
+          {position}
+        </td>
+        <td className="px-1 py-1">
           <button type="button" className="cursor-grab active:cursor-grabbing text-muted-foreground touch-none" {...attributes} {...listeners} aria-label="Drag to reorder">
             <GripVertical className="w-3.5 h-3.5" />
           </button>
+        </td>
+        <td
+          className="px-1 py-1"
+          onClickCapture={(e) => {
+            if (e.shiftKey) {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggleSelect(row.round_candidate_id, true);
+            }
+          }}
+        >
           <Checkbox checked={selected} onCheckedChange={() => onToggleSelect(row.round_candidate_id)} aria-label={`Select ${fullName(row)}`} />
-          <span className="text-xs text-muted-foreground tabular-nums">{row.candidate_number ? `#${row.candidate_number}` : '—'}</span>
-          <span className="font-medium truncate" title={fullName(row)}>{fullName(row)}</span>
-          <span className="text-xs text-muted-foreground">{row.year?.slice(0, 4)}</span>
-          <span className="text-xs text-muted-foreground truncate" title={row.major || ''}>{row.major || '—'}</span>
-          <span className="text-xs text-muted-foreground">{row.gender || '—'}</span>
-          <span className="flex flex-wrap gap-0.5">
+        </td>
+        <td className="px-2 py-1 tabular-nums text-muted-foreground whitespace-nowrap">{row.candidate_number ? `#${row.candidate_number}` : '—'}</td>
+        <td className="px-2 py-1 font-medium max-w-[220px] truncate" title={fullName(row)}>{fullName(row)}</td>
+        <td className="px-2 py-1 text-muted-foreground whitespace-nowrap">{row.year?.slice(0, 4)}</td>
+        <td className="px-2 py-1 text-muted-foreground max-w-[140px] truncate" title={row.major || ''}>{row.major || '—'}</td>
+        <td className="px-2 py-1 text-muted-foreground whitespace-nowrap">{row.gender || '—'}</td>
+        <td className="px-2 py-1 whitespace-nowrap">
+          <span className="flex flex-nowrap gap-0.5">
             {recommendations.length > 0 ? recommendations.map((r, i) => (
-              <Badge key={i} variant="outline" className={`text-[10px] px-1 ${RECOMMENDATION_STYLE[r] || ''}`}>
+              <Badge key={i} variant="outline" className={`text-[10px] px-1 shrink-0 ${RECOMMENDATION_STYLE[r] || ''}`}>
                 {r.replace('juniors_', 'Jr ')}
               </Badge>
             )) : '—'}
           </span>
-          {categories.map((c) => (
-            <span key={c.key} className="text-xs text-right tabular-nums" title={c.label}>
-              {c.value !== null ? c.value.toFixed(1) : '—'}
-            </span>
-          ))}
-          <span className="text-right font-semibold tabular-nums">
-            {total.value !== null ? total.value.toFixed(1) : '—'}
-          </span>
-          <ExpandableText label="Graders" value={graders} />
-          <ExpandableText label="Comments" value={comments} />
-          {notesInput}
+        </td>
+        {categories.map((c) => (
+          <td key={c.key} className="px-2 py-1 text-right tabular-nums" title={c.label}>
+            {c.value !== null ? c.value.toFixed(1) : '—'}
+          </td>
+        ))}
+        <td className="px-2 py-1 text-right font-semibold tabular-nums">
+          {total.value !== null ? total.value.toFixed(1) : '—'}
+        </td>
+        <td className="px-2 py-1 max-w-[180px]"><ExpandableText label="Graders" value={graders} /></td>
+        <td className="px-2 py-1 max-w-[220px]"><CommentsCell scores={row.scores || []} /></td>
+        <td className="px-2 py-1 max-w-[220px]">{notesInput}</td>
+        <td className="px-2 py-1">
           <span className="flex gap-1">
             {row.video_youtube_url && (
               <button type="button" onClick={() => window.open(row.video_youtube_url!, '_blank')} title="Watch video">
@@ -395,45 +447,53 @@ function SortableRow({
               </button>
             )}
           </span>
-          <span className="text-xs text-muted-foreground tabular-nums text-right">{row.application_ranking ?? '—'}</span>
-          <span className="text-center">{row.was_in_r1 ? <CheckCircle className="w-3.5 h-3.5 text-green-600 mx-auto" /> : '—'}</span>
-          <span className="text-center">{row.was_in_r2 ? <CheckCircle className="w-3.5 h-3.5 text-green-600 mx-auto" /> : '—'}</span>
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" disabled={!row.scores?.length}>
-              <ChevronDown className={`w-4 h-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-            </Button>
-          </CollapsibleTrigger>
-        </div>
+        </td>
+        <td className="px-2 py-1 text-muted-foreground tabular-nums text-right">{row.application_ranking ?? '—'}</td>
+        <td className="px-2 py-1 text-center">{row.was_in_r1 ? <CheckCircle className="w-3.5 h-3.5 text-green-600 mx-auto" /> : '—'}</td>
+        <td className="px-2 py-1 text-center">{row.was_in_r2 ? <CheckCircle className="w-3.5 h-3.5 text-green-600 mx-auto" /> : '—'}</td>
+        <td className="px-1 py-1">
+          <Button
+            type="button" variant="ghost" size="sm" className="h-6 w-6 p-0"
+            disabled={!row.scores?.length}
+            onClick={() => onToggleExpand(row.round_candidate_id)}
+          >
+            <ChevronDown className={`w-4 h-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+          </Button>
+        </td>
+      </tr>
 
-        <CollapsibleContent>
-          <div className="px-4 pb-3 pt-1 space-y-3 border-t bg-muted/20">
-            <p className="text-xs text-muted-foreground">Per-grader breakdown</p>
-            {(row.scores || []).map((s, i) => (
-              <div key={i} className="text-sm space-y-1">
-                <div className="flex justify-between">
-                  <span className="font-medium">
-                    {[s.interviewer_name, s.co_interviewer_name].filter(Boolean).join(', ')}
-                    {s.room_label ? ` — ${s.room_label}` : ''}
-                  </span>
-                  <span className="tabular-nums">{s.total_score.toFixed(1)}</span>
+      {expanded && (
+        <tr className="border-b border-border bg-muted/20">
+          <td colSpan={colCount} className="px-4 pb-3 pt-2">
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">Per-grader breakdown</p>
+              {(row.scores || []).map((s, i) => (
+                <div key={i} className="text-sm space-y-1">
+                  <div className="flex justify-between">
+                    <span className="font-medium">
+                      {[s.interviewer_name, s.co_interviewer_name].filter(Boolean).join(', ')}
+                      {s.room_label ? ` — ${s.room_label}` : ''}
+                    </span>
+                    <span className="tabular-nums">{s.total_score.toFixed(1)}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
+                    {Object.entries(s.section_totals || {}).map(([k, v]) => (
+                      <span key={k}>{k}: {v.toFixed(1)}</span>
+                    ))}
+                    {s.candidate_phone && <span>Phone: {s.candidate_phone}</span>}
+                    {Object.entries(s.availability || {}).map(([k, v]) => (
+                      <span key={k}>{k}: {v ? 'Yes' : 'No'}</span>
+                    ))}
+                  </div>
+                  {s.glaring_concerns && <p className="text-xs text-amber-700">Concerns: {s.glaring_concerns}</p>}
+                  {s.overall_impression && <p className="text-muted-foreground">{s.overall_impression}</p>}
                 </div>
-                <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
-                  {Object.entries(s.section_totals || {}).map(([k, v]) => (
-                    <span key={k}>{k}: {v.toFixed(1)}</span>
-                  ))}
-                  {s.candidate_phone && <span>Phone: {s.candidate_phone}</span>}
-                  {Object.entries(s.availability || {}).map(([k, v]) => (
-                    <span key={k}>{k}: {v ? 'Yes' : 'No'}</span>
-                  ))}
-                </div>
-                {s.glaring_concerns && <p className="text-xs text-amber-700">Concerns: {s.glaring_concerns}</p>}
-                {s.overall_impression && <p className="text-muted-foreground">{s.overall_impression}</p>}
-              </div>
-            ))}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-    </div>
+              ))}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -481,6 +541,8 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
   const [sortState, setSortState] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
   const [advanceCounts, setAdvanceCounts] = useState<Record<Round, number | null>>({ RESUME: null, R1: null, R2: null });
   const [advanceDraft, setAdvanceDraft] = useState('');
+  const [outerSigma, setOuterSigma] = useState('2');
+  const [innerSigma, setInnerSigma] = useState('1');
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -591,12 +653,29 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
 
   const sectionKeys = useMemo(() => (round === 'RESUME' ? [] : sectionKeysFor(rows)), [rows, round]);
 
-  const toggleSelect = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
+  // lastClickedIndex backs shift-click range select (Resume table only, for
+  // now): shift-click extends the selection between the last click and this
+  // one, Explorer/Sheets-style, instead of toggling just the one row.
+  const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
+
+  const toggleSelect = (id: string, shiftKey?: boolean) => {
+    const idx = rows.findIndex((r) => r.round_candidate_id === id);
+    if (shiftKey && lastClickedIndex !== null && idx !== -1) {
+      const [start, end] = idx < lastClickedIndex ? [idx, lastClickedIndex] : [lastClickedIndex, idx];
+      const rangeIds = rows.slice(start, end + 1).map((r) => r.round_candidate_id);
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        rangeIds.forEach((rid) => next.add(rid));
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+      });
+    }
+    if (idx !== -1) setLastClickedIndex(idx);
   };
 
   const selectAll = () => setSelectedIds(new Set(rows.map((r) => r.round_candidate_id)));
@@ -625,7 +704,17 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
 
   // Purple ("invite to reapply") is intentionally never auto-assigned here —
   // it's a judgment call about a specific person, not a score threshold.
+  // Thresholds are editable (outerSigma/innerSigma, default 2σ/1σ) rather
+  // than hardcoded, since what counts as "clearly above the pack" varies by
+  // cycle and by how tightly scores are clustered.
   const autoColorByScore = () => {
+    const outer = parseFloat(outerSigma);
+    const inner = parseFloat(innerSigma);
+    if (Number.isNaN(outer) || Number.isNaN(inner) || outer < inner) {
+      toast.error('Outer σ must be a number ≥ inner σ');
+      return;
+    }
+
     const scored = rows.filter((r) => scoreValueFor(r, round) !== null);
     if (scored.length < 2) {
       toast.info('Need at least a couple of scored candidates to auto-color');
@@ -640,10 +729,10 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
       if (val === null) return r;
       const z = (val - mean) / sd;
       let color: string;
-      if (z >= 2) color = 'dark-green';
-      else if (z >= 1) color = 'green';
-      else if (z <= -2) color = 'dark-red';
-      else if (z <= -1) color = 'red';
+      if (z >= outer) color = 'dark-green';
+      else if (z >= inner) color = 'green';
+      else if (z <= -outer) color = 'dark-red';
+      else if (z <= -inner) color = 'red';
       else color = 'yellow';
       return { ...r, color };
     });
@@ -789,7 +878,6 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
 
   const rowIds = useMemo(() => rows.map((r) => r.round_candidate_id), [rows]);
   const isResume = round === 'RESUME';
-  const gridTemplate = isResume ? RESUME_ROW_TEMPLATE : interviewRowTemplate(sectionKeys.length);
 
   return (
     <div className="space-y-4">
@@ -802,6 +890,21 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
           </TabsList>
         </Tabs>
         <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span>Outer</span>
+            <Input
+              type="number" step={0.25} value={outerSigma}
+              onChange={(e) => setOuterSigma(e.target.value)}
+              className="h-8 w-14 text-xs" title="Outer σ — dark-green/dark-red cutoff"
+            />
+            <span>σ / Inner</span>
+            <Input
+              type="number" step={0.25} value={innerSigma}
+              onChange={(e) => setInnerSigma(e.target.value)}
+              className="h-8 w-14 text-xs" title="Inner σ — green/red cutoff"
+            />
+            <span>σ</span>
+          </div>
           <Button variant="outline" size="sm" onClick={autoColorByScore}>
             <Sparkles className="w-4 h-4 mr-2" />
             Auto-color by std. dev.
@@ -872,60 +975,44 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
             </div>
           ) : rows.length === 0 ? (
             <div className="py-12 text-center text-muted-foreground">No candidates for this round yet.</div>
-          ) : (
+          ) : isResume ? (
             <div className="overflow-x-auto">
-              <div
-                className="grid gap-1.5 px-2 pb-1.5 text-xs font-medium text-muted-foreground min-w-max"
-                style={{ gridTemplateColumns: gridTemplate }}
-              >
-                <span className="text-center" title="Position in current order">#</span>
-                <span /><span />
-                <SortHeader label="ID" sortKey="id" getValue={(r) => r.candidate_number ?? null} sortState={sortState} onSort={sortRows} />
-                <SortHeader label="Name" sortKey="name" getValue={(r) => fullName(r)} sortState={sortState} onSort={sortRows} />
-                <SortHeader label="Year" sortKey="year" getValue={(r) => r.year} sortState={sortState} onSort={sortRows} />
-                <SortHeader label="Major" sortKey="major" getValue={(r) => r.major} sortState={sortState} onSort={sortRows} />
-                <span>Gender</span>
-                {isResume ? (
-                  <>
-                    <SortHeader label="ELO" sortKey="elo" getValue={(r) => r.elo_rating ?? null} align="right" sortState={sortState} onSort={sortRows} />
-                    <SortHeader label="Video Avg" sortKey="video" getValue={(r) => r.video_avg_score ?? null} align="right" sortState={sortState} onSort={sortRows} />
-                    <SortHeader label="Combined" sortKey="score" getValue={(r) => scoreValueFor(r, round)} align="right" sortState={sortState} onSort={sortRows} />
-                    <span>Notes</span>
-                    <span>Links</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Rec.</span>
-                    {sectionKeys.map((k) => (
-                      <SortHeader key={k} label={k} sortKey={`sec:${k}`} getValue={(r) => avgSectionTotals(r)[k] ?? null} align="right" sortState={sortState} onSort={sortRows} />
-                    ))}
-                    <SortHeader label="Avg Total" sortKey="score" getValue={(r) => scoreValueFor(r, round)} align="right" sortState={sortState} onSort={sortRows} />
-                    <span>Graders</span><span>Comments</span><span>Notes</span><span>Links</span>
-                    <SortHeader label="Rank" sortKey="rank" getValue={(r) => r.application_ranking ?? null} align="right" sortState={sortState} onSort={sortRows} />
-                    <span className="text-center">R1</span><span className="text-center">R2</span><span />
-                  </>
-                )}
-              </div>
-              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                <SortableContext items={rowIds} strategy={verticalListSortingStrategy}>
-                  <div className="space-y-1 min-w-max">
-                    {(() => {
-                      const cutoff = advanceCounts[round];
-                      return rows.map((row, index) => (
-                        <Fragment key={row.round_candidate_id}>
-                          {cutoff !== null && cutoff > 0 && cutoff < rows.length && index === cutoff && (
-                            <div className="flex items-center gap-2 py-1 text-[11px] font-medium text-muted-foreground select-none">
-                              <div className="flex-1 border-t border-dashed border-border" />
-                              top {cutoff} advance
-                              <div className="flex-1 border-t border-dashed border-border" />
-                            </div>
-                          )}
-                          <div className={cutoff !== null && index >= cutoff ? 'opacity-50' : undefined}>
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="text-left text-xs font-medium text-muted-foreground border-b border-border">
+                    <th className="px-2 pb-1.5 font-medium text-center" title="Position in current order">#</th>
+                    <th className="px-1 pb-1.5" />
+                    <th className="px-1 pb-1.5" />
+                    <th className="px-2 pb-1.5 font-medium"><SortHeader label="ID" sortKey="id" getValue={(r) => r.candidate_number ?? null} sortState={sortState} onSort={sortRows} /></th>
+                    <th className="px-2 pb-1.5 font-medium"><SortHeader label="Name" sortKey="name" getValue={(r) => fullName(r)} sortState={sortState} onSort={sortRows} /></th>
+                    <th className="px-2 pb-1.5 font-medium"><SortHeader label="Year" sortKey="year" getValue={(r) => r.year} sortState={sortState} onSort={sortRows} /></th>
+                    <th className="px-2 pb-1.5 font-medium"><SortHeader label="Major" sortKey="major" getValue={(r) => r.major} sortState={sortState} onSort={sortRows} /></th>
+                    <th className="px-2 pb-1.5 font-medium">Gender</th>
+                    <th className="px-2 pb-1.5 font-medium"><SortHeader label="ELO" sortKey="elo" getValue={(r) => r.elo_rating ?? null} align="right" sortState={sortState} onSort={sortRows} /></th>
+                    <th className="px-2 pb-1.5 font-medium"><SortHeader label="Video Avg" sortKey="video" getValue={(r) => r.video_avg_score ?? null} align="right" sortState={sortState} onSort={sortRows} /></th>
+                    <th className="px-2 pb-1.5 font-medium"><SortHeader label="Combined" sortKey="score" getValue={(r) => scoreValueFor(r, round)} align="right" sortState={sortState} onSort={sortRows} /></th>
+                    <th className="px-2 pb-1.5 font-medium">Notes</th>
+                    <th className="px-2 pb-1.5 font-medium">Links</th>
+                  </tr>
+                </thead>
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                  <SortableContext items={rowIds} strategy={verticalListSortingStrategy}>
+                    <tbody>
+                      {(() => {
+                        const cutoff = advanceCounts[round];
+                        return rows.map((row, index) => (
+                          <Fragment key={row.round_candidate_id}>
+                            {cutoff !== null && cutoff > 0 && cutoff < rows.length && index === cutoff && (
+                              <tr>
+                                <td colSpan={13} className="py-1 text-[11px] font-medium text-muted-foreground select-none text-center border-t border-dashed border-border">
+                                  top {cutoff} advance
+                                </td>
+                              </tr>
+                            )}
                             <SortableRow
                               row={row}
                               round={round}
                               sectionKeys={sectionKeys}
-                              gridTemplate={gridTemplate}
                               position={index + 1}
                               selected={selectedIds.has(row.round_candidate_id)}
                               onToggleSelect={toggleSelect}
@@ -934,14 +1021,80 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
                               onViewResume={viewResume}
                               onNotesChange={updateNotesLocal}
                               onNotesSave={saveNotes}
+                              dimmed={cutoff !== null && index >= cutoff}
                             />
-                          </div>
-                        </Fragment>
-                      ));
-                    })()}
-                  </div>
-                </SortableContext>
-              </DndContext>
+                          </Fragment>
+                        ));
+                      })()}
+                    </tbody>
+                  </SortableContext>
+                </DndContext>
+              </table>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="text-left text-xs font-medium text-muted-foreground border-b border-border">
+                    <th className="px-2 pb-1.5 font-medium text-center" title="Position in current order">#</th>
+                    <th className="px-1 pb-1.5" />
+                    <th className="px-1 pb-1.5" />
+                    <th className="px-2 pb-1.5 font-medium"><SortHeader label="ID" sortKey="id" getValue={(r) => r.candidate_number ?? null} sortState={sortState} onSort={sortRows} /></th>
+                    <th className="px-2 pb-1.5 font-medium"><SortHeader label="Name" sortKey="name" getValue={(r) => fullName(r)} sortState={sortState} onSort={sortRows} /></th>
+                    <th className="px-2 pb-1.5 font-medium"><SortHeader label="Year" sortKey="year" getValue={(r) => r.year} sortState={sortState} onSort={sortRows} /></th>
+                    <th className="px-2 pb-1.5 font-medium"><SortHeader label="Major" sortKey="major" getValue={(r) => r.major} sortState={sortState} onSort={sortRows} /></th>
+                    <th className="px-2 pb-1.5 font-medium">Gender</th>
+                    <th className="px-2 pb-1.5 font-medium">Rec.</th>
+                    {sectionKeys.map((k) => (
+                      <th key={k} className="px-2 pb-1.5 font-medium"><SortHeader label={k} sortKey={`sec:${k}`} getValue={(r) => avgSectionTotals(r)[k] ?? null} align="right" sortState={sortState} onSort={sortRows} /></th>
+                    ))}
+                    <th className="px-2 pb-1.5 font-medium"><SortHeader label="Avg Total" sortKey="score" getValue={(r) => scoreValueFor(r, round)} align="right" sortState={sortState} onSort={sortRows} /></th>
+                    <th className="px-2 pb-1.5 font-medium">Graders</th>
+                    <th className="px-2 pb-1.5 font-medium">Comments</th>
+                    <th className="px-2 pb-1.5 font-medium">Notes</th>
+                    <th className="px-2 pb-1.5 font-medium">Links</th>
+                    <th className="px-2 pb-1.5 font-medium"><SortHeader label="Rank" sortKey="rank" getValue={(r) => r.application_ranking ?? null} align="right" sortState={sortState} onSort={sortRows} /></th>
+                    <th className="px-2 pb-1.5 font-medium text-center">R1</th>
+                    <th className="px-2 pb-1.5 font-medium text-center">R2</th>
+                    <th className="px-1 pb-1.5" />
+                  </tr>
+                </thead>
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                  <SortableContext items={rowIds} strategy={verticalListSortingStrategy}>
+                    <tbody>
+                      {(() => {
+                        const cutoff = advanceCounts[round];
+                        const colCount = 18 + sectionKeys.length;
+                        return rows.map((row, index) => (
+                          <Fragment key={row.round_candidate_id}>
+                            {cutoff !== null && cutoff > 0 && cutoff < rows.length && index === cutoff && (
+                              <tr>
+                                <td colSpan={colCount} className="py-1 text-[11px] font-medium text-muted-foreground select-none text-center border-t border-dashed border-border">
+                                  top {cutoff} advance
+                                </td>
+                              </tr>
+                            )}
+                            <SortableRow
+                              row={row}
+                              round={round}
+                              sectionKeys={sectionKeys}
+                              position={index + 1}
+                              selected={selectedIds.has(row.round_candidate_id)}
+                              onToggleSelect={toggleSelect}
+                              expanded={expandedId === row.round_candidate_id}
+                              onToggleExpand={(id) => setExpandedId((prev) => (prev === id ? null : id))}
+                              onViewResume={viewResume}
+                              onNotesChange={updateNotesLocal}
+                              onNotesSave={saveNotes}
+                              dimmed={cutoff !== null && index >= cutoff}
+                            />
+                          </Fragment>
+                        ));
+                      })()}
+                    </tbody>
+                  </SortableContext>
+                </DndContext>
+              </table>
             </div>
           )}
         </CardContent>
