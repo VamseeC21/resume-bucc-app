@@ -89,6 +89,14 @@ const PALETTE: Array<{ key: string; hex: string; label: string }> = [
   { key: 'purple', hex: '#a855f7', label: 'Invite to reapply' },
 ];
 
+// Mirrors the Question 2 prompts on the application form (src/pages/Apply.tsx)
+// so the deliberation tooltip shows what the candidate actually answered
+// instead of just the bare letter.
+const VIDEO_Q2_PROMPT: Record<string, string> = {
+  A: "What are three things you don't care about at all?",
+  B: 'If you had to give yourself a nickname, what would it be and why?',
+};
+
 const RECOMMENDATION_STYLE: Record<string, string> = {
   yes: 'text-green-600 border-green-600',
   juniors_yes: 'text-green-600 border-green-600',
@@ -361,7 +369,7 @@ function SortableRow({
               <Badge
                 variant="outline"
                 className="text-[10px] px-1 shrink-0"
-                title={`Answered Question 2, option ${row.video_question_2_choice}`}
+                title={`Q2 (${row.video_question_2_choice}): ${VIDEO_Q2_PROMPT[row.video_question_2_choice] || 'Unknown option'}`}
               >
                 Q2:{row.video_question_2_choice}
               </Badge>

@@ -704,10 +704,10 @@ export default function GradeVideos() {
                 <CardHeader>
                   <CardTitle className="text-lg">Video Response</CardTitle>
                   <CardDescription>
-                    Question 2 Choice: {selectedApplication?.video_question_2_choice === 'A' 
-                      ? 'A - Something I care deeply about'
+                    Question 2 Choice: {selectedApplication?.video_question_2_choice === 'A'
+                      ? 'A - Three things I don\'t care about at all'
                       : selectedApplication?.video_question_2_choice === 'B'
-                      ? 'B - A moment that changed my perspective'
+                      ? 'B - My nickname and why'
                       : 'Not specified'}
                   </CardDescription>
                 </CardHeader>
@@ -784,9 +784,9 @@ export default function GradeVideos() {
                       <Label className="text-base font-semibold">
                         Question #2:{' '}
                         {selectedApplication?.video_question_2_choice === 'A'
-                          ? 'What\'s something you care deeply about?'
+                          ? 'What are three things you don\'t care about at all?'
                           : selectedApplication?.video_question_2_choice === 'B'
-                          ? 'What\'s a moment that changed your perspective?'
+                          ? 'If you had to give yourself a nickname, what would it be and why?'
                           : 'Question #2'}{' '}
                         <span className="text-red-500">*</span>
                       </Label>
