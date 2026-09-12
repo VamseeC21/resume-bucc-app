@@ -8,8 +8,8 @@ import Auth from "./pages/Auth";
 import SelectGame from "./pages/SelectGame";
 import Grade from "./pages/Grade";
 import Admin from "./pages/Admin";
-import Apply from "./pages/Apply";
-// import ApplicationClosed from "./pages/ApplicationClosed"; // swap in for <Apply /> below to close applications
+// import Apply from "./pages/Apply"; // swap in for <ApplicationClosed /> below to reopen applications
+import ApplicationClosed from "./pages/ApplicationClosed";
 import GradeVideos from "./pages/GradeVideos";
 import Interview from "./pages/Interview";
 import NotFound from "./pages/NotFound";
@@ -26,7 +26,7 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Navigate to="/apply" replace />} />
             <Route path="/auth" element={<Auth />} />
-            <Route path="/apply" element={<Apply />} /* swap to <ApplicationClosed /> to close applications */ />
+            <Route path="/apply" element={<ApplicationClosed />} /* swap to <Apply /> to reopen applications */ />
             <Route path="/select-game" element={<SelectGame />} />
             <Route path="/grade" element={<Grade />} />
             <Route path="/grade-videos" element={<GradeVideos />} />
