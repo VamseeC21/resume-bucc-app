@@ -14,8 +14,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Loader2, GripVertical, ChevronDown, ChevronUp, Sparkles,
@@ -231,15 +232,17 @@ function ExpandableText({ label, value }: { label: string; value: string }) {
   );
 }
 
-// Same click-to-expand pattern as ExpandableText, but keeps each grader's
-// comment attributed to them instead of flattening everyone into one
-// '|'-joined string -- easier to tell who said what during deliberation.
-function CommentsCell({ scores }: { scores: ScoreDetail[] }) {
+// Opens as a full dialog (rather than a small popover) so each interviewer's
+// write-up gets its own tab -- easier to read in full, without scrolling a
+// cramped box, when a candidate was seen by more than one interviewer.
+function CommentsCell({ scores, candidateName }: { scores: ScoreDetail[]; candidateName: string }) {
   const withComments = (scores || []).filter((s) => s.overall_impression);
   const preview = withComments.map((s) => s.overall_impression).join(' | ');
+  const [activeTab, setActiveTab] = useState('0');
+
   return (
-    <Popover>
-      <PopoverTrigger asChild>
+    <Dialog>
+      <DialogTrigger asChild>
         <button
           type="button"
           className="text-xs text-muted-foreground truncate text-left w-full hover:text-foreground hover:underline decoration-dotted underline-offset-2"
@@ -247,26 +250,48 @@ function CommentsCell({ scores }: { scores: ScoreDetail[] }) {
         >
           {preview || '—'}
         </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-96 max-h-80 overflow-y-auto" align="start">
-        <p className="text-xs font-semibold text-muted-foreground mb-1.5">Comments</p>
+      </DialogTrigger>
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Comments — {candidateName}</DialogTitle>
+        </DialogHeader>
         {withComments.length === 0 ? (
-          <p className="text-sm text-muted-foreground">—</p>
-        ) : (
-          <div className="space-y-2.5">
-            {withComments.map((s, i) => (
-              <div key={i}>
-                <p className="text-xs font-medium">
-                  {[s.interviewer_name, s.co_interviewer_name].filter(Boolean).join(', ')}
-                  {s.room_label ? ` — ${s.room_label}` : ''}
-                </p>
-                <p className="text-sm whitespace-pre-wrap">{s.overall_impression}</p>
-              </div>
-            ))}
+          <p className="text-sm text-muted-foreground">No comments submitted.</p>
+        ) : withComments.length === 1 ? (
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-1.5">
+              {[withComments[0].interviewer_name, withComments[0].co_interviewer_name].filter(Boolean).join(', ')}
+              {withComments[0].room_label ? ` — ${withComments[0].room_label}` : ''}
+            </p>
+            <p className="text-sm whitespace-pre-wrap">{withComments[0].overall_impression}</p>
           </div>
+        ) : (
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="h-auto flex-wrap gap-1 bg-muted/50 p-1 rounded-lg justify-start border border-border">
+              {withComments.map((s, i) => (
+                <TabsTrigger
+                  key={i}
+                  value={String(i)}
+                  className="text-xs max-w-[160px] truncate data-[state=active]:shadow-md data-[state=active]:border data-[state=active]:border-border"
+                >
+                  {s.interviewer_name || `Interviewer ${i + 1}`}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            {withComments.map((s, i) => (
+              <TabsContent key={i} value={String(i)} className="mt-3">
+                {(s.co_interviewer_name || s.room_label) && (
+                  <p className="text-xs text-muted-foreground mb-1.5">
+                    {[s.co_interviewer_name && `with ${s.co_interviewer_name}`, s.room_label].filter(Boolean).join(' — ')}
+                  </p>
+                )}
+                <p className="text-sm whitespace-pre-wrap">{s.overall_impression}</p>
+              </TabsContent>
+            ))}
+          </Tabs>
         )}
-      </PopoverContent>
-    </Popover>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -440,7 +465,7 @@ function SortableRow({
           {total.value !== null ? total.value.toFixed(1) : '—'}
         </td>
         <td className="px-2 py-1 max-w-[180px]"><ExpandableText label="Graders" value={graders} /></td>
-        <td className="px-2 py-1 max-w-[220px]"><CommentsCell scores={row.scores || []} /></td>
+        <td className="px-2 py-1 max-w-[220px]"><CommentsCell scores={row.scores || []} candidateName={fullName(row)} /></td>
         <td className="px-2 py-1 max-w-[220px]">{notesInput}</td>
         <td className="px-2 py-1">
           <span className="flex gap-1">
