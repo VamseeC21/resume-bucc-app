@@ -581,12 +581,17 @@ export default function Interview() {
     }
   }, [applicants]);
 
+  // Preserve any forms already in memory for these candidates (e.g. after
+  // "Back to Roster" and re-selecting the same people) instead of blanking
+  // their scores/notes back to empty.
   const startGrading = async () => {
-    const initial: Record<string, CandidateFormState> = {};
-    for (const id of selectedIds) {
-      initial[id] = emptyForm();
-    }
-    setForms(initial);
+    setForms((prev) => {
+      const next = { ...prev };
+      for (const id of selectedIds) {
+        if (!next[id]) next[id] = emptyForm();
+      }
+      return next;
+    });
     setGrading(true);
     await fetchResumeUrls(selectedIds);
   };
