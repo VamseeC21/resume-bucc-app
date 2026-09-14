@@ -71,17 +71,17 @@ SCORING GUIDE (applies to every behavioral question):
         criteria: [
           { key: 'intro_why_bucc', label: 'Q1: Tell us about yourself & why BUCC', min: 0, max: 4 },
           { key: 'q2', label: 'Q2 (pick version asked)', min: 0, max: 4, variants: [
-            'V1: Tell me about a time you were given a vague or poorly defined problem. How did you structure it and decide what to focus on first?',
-            'V2: Describe a time you identified an opportunity for improvement that wasn\'t assigned to you. What action did you take and what impact did it have?',
+            'V1: Describe a time you received critical feedback that you disagreed with. How did you respond?',
+            'V2: Describe a time you took initiative on something without being asked. What motivated you, and what was the result?',
           ] },
           { key: 'q3', label: 'Q3 (pick version asked)', min: 0, max: 4, variants: [
-            'V1: Tell me about a time you disagreed with a teammate or leader on an approach. How did you handle it, and what was the outcome?',
-            'V2: Give an example of a time you made a mistake. How did you take responsibility and what did you learn?',
+            'V1: Tell me about your greatest accomplishment or failure?',
+            'V2: Tell me about a time you had to evaluate multiple important decisions competing for your time. How did you prioritize them?',
           ] },
           { key: 'q4_creative', label: 'Q4: Creative (ONE per candidate)', min: 0, max: 4, variants: [
-            'V1: What is the biggest problem with Ohio State University as you see it, and how would you resolve this issue?',
-            'V2: You\'re designing a space meant to make people talk to each other. What does it look like?',
-            'V3: Describe society as it is today to someone 200 years ago. What pillars of society hold us afloat today and how would you explain that to someone with no knowledge?',
+            'V1: Using no external resources, how would you calculate how many windows are in Manhattan, New York?',
+            'V2: If you had $1,000 and needed to double it in 24 hours, how would you do it?',
+            'V3: If you were given $10 million to help solve a world problem, what problem would you choose and how would you contribute to the solution?',
           ] },
         ],
       },
@@ -93,13 +93,13 @@ SCORING GUIDE (applies to every behavioral question):
 Confirm they're ready to hear the prompt and can take notes, then choose ONE prompt below and read it aloud.
 
 PROMPT #1
-Company Background: ByteDance, owner of TikTok, is one of the largest digital content and social media companies globally and has no direct consumer productivity platform presence in the United States. They are considering launching a productivity + collaboration platform for the U.S. market.
-Objective: Estimate the U.S. market size for productivity and collaboration software and recommend a market entry strategy to compete with existing players like Microsoft (Teams), Google (Workspace), and Slack.
+Company Background: LearnPilot is a well-funded startup that has built an AI-powered study assistant used by 500,000 students in Europe. It helps students break down lecture notes, generate practice quizzes, and get tutoring-style explanations on demand. They have not yet entered the U.S. market.
+Objective: Estimate the U.S. market size for AI tutoring software. Then recommend how LearnPilot should enter the U.S.
 Your group will have 15 minutes to develop a strategy and three minutes to present.
 
 PROMPT #2
-Company Background: MoveWell is a small app that helps people improve posture and reduce back pain through short daily exercises. User growth has stalled over the past six months.
-Objective: Identify the top 2–3 reasons user growth might be slowing and recommend practical steps the team should take in the next three months.
+Company Background: Avride is a robotics startup that develops small sidewalk delivery robots capable of autonomously delivering food in urban and suburban environments. They are well established on college campuses across the country (including Ohio State), and want to expand into mid-sized U.S. cities.
+Objective: Estimate the U.S. food delivery market that could realistically be addressed by autonomous robots in the next five years, then identify key factors Avride will need to address moving into off-campus markets.
 Your group will have 15 minutes to develop a strategy and three minutes to present.
 
 GUIDELINES: If candidates ask about the prompt, you may ask them to make their own assumptions. Time the 15-minute brainstorm and develop the first two scores (Teamwork, Analysis) during that phase. Observe the pitch, ask questions if time permits, and time the group so the pitch doesn't exceed 3 minutes; score Presentation from the pitch.
