@@ -154,7 +154,6 @@ GUT FEELING: Keep in mind only ~40% of candidates will move on to the second-rou
         script: `Before you start, briefly introduce yourselves to the candidate.
 
 [READ]: Congratulations on making it to the second-round interview for the Buckeye Undergraduate Consulting Club. This interview will contain two sections: 1) your client proposal, and 2) the case.
-
 To start off, tell us a bit about yourself and why are you here?`,
         criteria: [],
       },
@@ -174,8 +173,7 @@ To start off, tell us a bit about yourself and why are you here?`,
       {
         key: 'client_proposal',
         title: 'Client Proposal (5–7 min present + 5–10 min Q&A)',
-        script: `[READ]: Next, we will begin the Client Proposal. As previously instructed, you are presenting to Netflix to propose a plan to drive revenue growth through non-subscription channels (e.g., gaming, live events, or merchandise) while improving long-term retention among "churn-prone" households.
-
+        script: `[READ]: Next, we will begin the Client Proposal. As previously instructed, your team has been hired by Hinge to propose a strategy to re-engage young adult daters by transforming the app experience.
 You will have 5 to 7 minutes to walk us through your proposal. Please be cognizant of time — hard cutoff at the 7 minute mark. Following the presentation, we'll take 5-10 minutes for follow-up questions.
 
 Ask the interviewer to pull out their laptop to present or connect to the screen. If no questions before starting, they may begin. Ask follow-up questions afterward if time permits.
@@ -205,20 +203,18 @@ All information for the case is in this guide, but interviewers can also refer t
       {
         key: 'case',
         title: 'Case — Framework',
-        script: `[READ]: Costco is exploring strategies to increase membership, especially among younger consumers who are less likely to buy bulk products. While existing members are loyal, new demographics remain underpenetrated, and the company is concerned that failure to attract younger members could limit long-term growth.
-
-Your team has been hired to propose a strategic plan to grow Costco's membership base and improve engagement with younger consumers. Recommendations may address membership pricing, product assortment, digital strategy, marketing campaigns, and in-store experiences.
+        script: `[READ]: You've been hired as a consultant for the LA Tourism Board and the LA28 Organizing Committee. Los Angeles expects over 5 million unique visitors during the 2028 Summer Games. However, many tourists only buy tickets for 1 or 2 sporting events and spend the rest of their time in hotels. The city wants to prevent visitors from just watching a game and leaving.
+Your team has been hired to design a strategy to maximize visitor spending across local LA businesses (restaurants, retail, entertainment, and cultural attractions) during the 17-day event.
 
 Give the candidate time to recap the prompt and ask clarifying questions.
 
 CLARIFYING INFORMATION (only provide if asked):
-— Member demographics: ~60% of members are over 35, 25% are 25–35, 15% are under 25.
-— Product preferences: older members buy bulk household goods/groceries; younger members favor tech gadgets, fitness products, organic foods, smaller-pack specialty items.
-— Marketing efforts: currently focused on in-store promotions and general email; digital campaigns targeting younger consumers are limited.
-— Membership pricing: Basic $65/yr, Executive $130/yr. Discounts/promotions for students or new members possible with board approval.
-— Success metrics: new memberships, renewal rates, total membership revenue, spending per member.
+— Current tourist behavior: Average visitors spend money on event tickets and hotels, but struggle to discover local entertainment or dining outside major venue areas.
+— Local business involvement: Small and local businesses currently lack a direct platform or partnership to connect with international tourists.
+— Budget & constraints: The city wants self-funding or partner-funded solutions (e.g., sponsorships, digital passes, or merchant commission models) rather than relying on city tax dollars.
+— Success metrics: Total non-ticket visitor spending, local business revenue lift, average length of stay, and visitor satisfaction scores.
 
-FRAMEWORK GUIDANCE: If three minutes pass without a finished framework, ask them to share what they have so far. Acknowledge their direction, then say something like: "I think it would be best if we started by looking at some of the costs of moving more manufacturing to the US."
+FRAMEWORK GUIDANCE: If three minutes pass without a finished framework, ask them to share what they have so far. Acknowledge their direction, then say something like: "I think it would be best if we started by looking at how to close the spending gap between when tourists' events end and when they head back to their hotels."
 
 FRAMEWORK SCORING RUBRIC:
 4: 2-3 buckets that are MECE (Mutually Exclusive, Collectively Exhaustive). Candidate explains why they're looking into each section and all areas are relevant. Candidate has a hypothesis that clarifies their top consideration and attempts to drive the case forward.
@@ -233,21 +229,16 @@ FRAMEWORK SCORING RUBRIC:
       {
         key: 'case_quant',
         title: 'Case — Quant',
-        script: `[READ]: Costco is considering offering college students a 20% discount off all memberships in addition to investing in a marketing campaign to promote awareness of the discount and boost membership. Costco wants the campaign to generate 33% ROI — what is the average annual spend required by these new members to meet Costco's profit goal?
-
-DATA PROVIDED:
-— Total marketing campaign investment: $1,500,000
-— Membership discount: 20% off for college students
-— Standard membership: $65/yr, Executive membership: $130/yr
-— 10,000 students will purchase a membership; 80% will do a standard membership
-— Costco's profit margin is 10%
+        script: `[READ]: The LA28 Organizing Committee is launching an official tourism app to drive visitor spending into local neighborhoods without using city tax dollars. The app costs $1,500,000 to build, market, and operate. To fund it, LA28 sells corporate sponsorship packages for $80,000 per company. However, onboarding each sponsor incurs a 37.5% administrative and technical setup cost of the package price.
+How many corporate sponsors does LA28 need to onboard to fully cover the app's costs and make a 10% return on investment?
 
 EXAMPLE CALCULATION (interviewer reference — do not read):
-Revenue Goal: $1,500,000 × 1.33 = $2,000,000
-Membership revenue: (0.80 × 10,000 × 65 × 0.80) + (0.20 × 10,000 × 130 × 0.80) = $624,000
-Remaining revenue goal: $2,000,000 − $624,000 = $1,376,000
-Apply profit margin: $1,376,000 = 0.10 × X → X = $13,760,000 total spend required from college students
-$13,760,000 / 10,000 students = $1,376 required average annual spend to meet ROI goal
+Total App Operating Cost: $1,500,000
+Gross Sponsorship Package Fee: $80,000 per company
+Administrative & Technical Setup Cost: 37.5% per package ($80,000 × 0.375) = $30,000
+Net Revenue per Sponsor: $80,000 − $30,000 = $50,000
+Target Revenue (10% ROI): $1,500,000 × 1.1 = $1,650,000
+ROI Calculation: $1,650,000 / $50,000 = 33 required corporate sponsors to generate 10% ROI
 
 QUANT SCORING RUBRIC:
 4: Recaps the numbers, walks interviewer through their thought process before calculating, gets the right answer with no help, puts the answer in context of the prompt.
@@ -262,9 +253,14 @@ QUANT SCORING RUBRIC:
       {
         key: 'case_brainstorm',
         title: 'Case — Brainstorming',
-        script: `[READ]: While the student discount might get Gen Z through the doors, data suggests that "bulk buying" is a barrier for students living in small dorms or shared apartments with limited storage space. This demographic also prioritizes digital convenience over the traditional "treasure hunt" in-store experience.
+        script: `[READ]: LA28 and the LA Tourism Board have decided to launch an official tourism app to help turn the city's 5 million visitors into active spenders across local neighborhoods. However, since the city denied the proposal to use city tax dollars to fund the initiative, the team must secure corporate and public partnerships to build, launch, and maintain the digital infrastructure.
+Which corporate sponsors — such as payment processors, mobility platforms, delivery services, and telecom giants — should we target to fund the app, and what unique strategic value, monetization channels, or data insights can we offer them in return?
 
-Beyond just a price discount, how can Costco redesign its product assortment and digital experience to become an essential brand for younger consumers without alienating its core base of suburban families?
+SAMPLE SPONSOR CATEGORIES (interviewer reference — do not read):
+— Payment Networks & Wallet Integrations: exclusive in-app transaction rights, zero-fee processing for local shops, tap-to-pay wallet integration for frictionless cross-border purchases.
+— Mobility & Transit Platforms: direct in-app ride booking to neighborhood hubs, sponsored transit routes into commercial corridors away from stadium traffic.
+— Food Ordering & Delivery Ecosystems: multi-language menus, mobile order-ahead tools, featured neighborhood dining guides to drive foot traffic to small restaurants.
+— Telecom & Cloud Infrastructure: cloud hosting and real-time geofencing, 5G micro-hubs in fan zones, in exchange for enterprise branding.
 
 BRAINSTORMING SCORING RUBRIC:
 4: Separates ideas into 2-3 sections, creative yet practical solutions, explains how their solutions/ideas address the problem.
@@ -279,10 +275,10 @@ BRAINSTORMING SCORING RUBRIC:
       {
         key: 'case_conclusion',
         title: 'Case — Conclusion',
-        script: `[READ]: You have a meeting with Costco's Chief Marketing Officer, and they want your recommendation on what they should do. What do you tell them?
+        script: `[READ]: You have a meeting with the LA Tourism Board and they want your recommendation on what they should do. What do you tell them?
 
 EXAMPLE CONCLUSION (interviewer reference — do not read):
-"I would advise launching a targeted student membership campaign immediately. Offering a 20% discount combined with a focused marketing push is projected to generate an average annual spend of $1,376 per student, achieving the desired 33% ROI while driving long-term engagement with younger consumers. A key risk of this strategy is that the emphasis on smaller packs and digital convenience could harm the traditional bulk-buying experience valued by Costco's core suburban and family members, but this can be mitigated by maintaining bulk pricing and core product offerings while expanding student-focused bundles and digital options. Immediate next steps include piloting the discount at select stores, and refining product assortment and digital experiences based on initial engagement metrics."
+"I recommend launching the LA28 tourism app using 33 corporate sponsors paying $80,000 each. This brings in $2,640,000 total, which fully covers the app's cost and hits our 10% ROI target without spending any city tax dollars. A key risk is putting too many ads or logos in the app, which could annoy tourists and make the app frustrating to use. We can avoid this by keeping sponsor features helpful, like easy digital payments, sponsored shuttle drop-offs, and simple deals for local shops. Immediate next steps are pitching top payment and transit partners, signing up local small businesses, and testing the app before the Games begin."
 
 CONCLUSION SCORING RUBRIC:
 4: Under one minute. Leads with recommendation, gives points of reasoning, risks and mitigation, then next steps.
