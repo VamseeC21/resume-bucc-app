@@ -129,23 +129,67 @@ function sectionKeysFor(rows: DeliberationRow[]): string[] {
   return Array.from(keys);
 }
 
-// Average each section's total across every grader who scored this candidate,
-// so the comparison table reflects a consensus per category rather than
-// whichever score happened to be submitted first.
-function avgSectionTotals(row: DeliberationRow): Record<string, number> {
+// Sums the numeric criterion values in one section of a grader's raw
+// section_scores, skipping the string-valued "<criterion>_variant" fields
+// (e.g. which behavioral question wording was asked) that live alongside them.
+function sectionRawSum(sectionScores: Record<string, Record<string, number | string>>, sectionKey: string): number {
+  const section = sectionScores[sectionKey] || {};
+  return Object.entries(section).reduce((sum, [criterionKey, v]) => {
+    if (criterionKey.endsWith('_variant')) return sum;
+    const num = typeof v === 'number' ? v : Number(v);
+    return Number.isFinite(num) ? sum + num : sum;
+  }, 0);
+}
+
+// Recomputes one grader's section_totals/total_score straight from their raw
+// section_scores (0-4 per criterion, unaffected by any scoring-formula
+// change) instead of trusting the stored section_totals/total_score columns.
+// Those are computed and written client-side at submission time, so a grader
+// whose browser tab hadn't picked up a rubric-weighting change yet would
+// have written stale-format numbers straight to the database -- recomputing
+// here means the board is correct regardless of which app version any given
+// score was submitted from. Mirrors ROUND_CONFIGS.computeTotal in
+// Interview.tsx; keep the two in sync if the rubric weighting changes.
+function computeCanonicalTotals(round: Round, sectionScores: Record<string, Record<string, number | string>>): { total: number; sectionTotals: Record<string, number> } {
+  if (round === 'R1') {
+    const behavioralTotal = (sectionRawSum(sectionScores, 'behavioral') / 16) * 50;
+    const caseTotal = (sectionRawSum(sectionScores, 'case') / 12) * 50;
+    return { total: behavioralTotal + caseTotal, sectionTotals: { behavioral: behavioralTotal, case: caseTotal } };
+  }
+  const behavioralTotal = (sectionRawSum(sectionScores, 'behavioral') / 4) * 5;
+  const clientProposalTotal = (sectionRawSum(sectionScores, 'client_proposal') / 16) * 40;
+  const sectionTotals: Record<string, number> = { behavioral: behavioralTotal, client_proposal: clientProposalTotal };
+  ['case', 'case_quant', 'case_brainstorm', 'case_conclusion'].forEach((k) => {
+    sectionTotals[k] = (sectionRawSum(sectionScores, k) / 16) * 40;
+  });
+  const total = Object.values(sectionTotals).reduce((s, v) => s + v, 0);
+  return { total, sectionTotals };
+}
+
+// Average each section's canonical total across every grader who scored this
+// candidate, so the comparison table reflects a consensus per category
+// rather than whichever score happened to be submitted first.
+function avgSectionTotals(row: DeliberationRow, round: Round): Record<string, number> {
   const acc: Record<string, { sum: number; count: number }> = {};
   (row.scores || []).forEach((s) => {
-    Object.entries(s.section_totals || {}).forEach(([k, v]) => {
-      const num = typeof v === 'number' ? v : Number(v);
-      if (Number.isNaN(num)) return;
+    const { sectionTotals } = computeCanonicalTotals(round, s.section_scores || {});
+    Object.entries(sectionTotals).forEach(([k, v]) => {
       if (!acc[k]) acc[k] = { sum: 0, count: 0 };
-      acc[k].sum += num;
+      acc[k].sum += v;
       acc[k].count += 1;
     });
   });
   const out: Record<string, number> = {};
   Object.entries(acc).forEach(([k, { sum, count }]) => { out[k] = sum / count; });
   return out;
+}
+
+// Averages every grader's canonical (recomputed) total for this candidate.
+function canonicalAvgTotal(row: DeliberationRow, round: Round): number | null {
+  const scores = row.scores || [];
+  if (scores.length === 0) return null;
+  const totals = scores.map((s) => computeCanonicalTotals(round, s.section_scores || {}).total);
+  return totals.reduce((a, b) => a + b, 0) / totals.length;
 }
 
 // The four case-flavored sections (R1 just has 'case'; R2 splits it into
@@ -171,7 +215,7 @@ function categoriesFor(row: DeliberationRow, round: Round, sectionKeys: string[]
     ];
   }
   const hasScores = (row.scores || []).length > 0;
-  const avgs = avgSectionTotals(row);
+  const avgs = avgSectionTotals(row, round);
   const caseKeys = caseKeysFor(sectionKeys);
 
   return [
@@ -195,14 +239,15 @@ function categoriesFor(row: DeliberationRow, round: Round, sectionKeys: string[]
 
 function totalFor(row: DeliberationRow, round: Round): { label: string; value: number | null } {
   if (round === 'RESUME') return { label: 'Combined', value: row.combined_score ?? null };
+  const avg = canonicalAvgTotal(row, round);
   if (round === 'R2') {
-    if (row.avg_score == null) return { label: 'Avg Total', value: null };
+    if (avg === null) return { label: 'Avg Total', value: null };
     // 15% of R2's total comes from R1 performance, layered on here since an
     // individual R2 grader's submitted total_score never includes it.
     const r1Contribution = ((row.r1_avg_score ?? 0) / 100) * 15;
-    return { label: 'Avg Total', value: row.avg_score + r1Contribution };
+    return { label: 'Avg Total', value: avg + r1Contribution };
   }
-  return { label: 'Avg Total', value: row.avg_score ?? null };
+  return { label: 'Avg Total', value: avg };
 }
 
 function gradersFor(row: DeliberationRow): string {
@@ -243,13 +288,14 @@ function prettyLabel(key: string): string {
   return key.split('_').map((w) => LABEL_OVERRIDES[w] || (w.charAt(0).toUpperCase() + w.slice(1))).join(' ');
 }
 
-// One grader's section_totals splits Case across 4 sub-sections (case,
-// case_quant, case_brainstorm, case_conclusion) since each is scored/scaled
-// separately, but that's noise here -- the raw per-criterion breakdown right
-// below already shows framework/quant/brainstorm/conclusion individually, so
-// this collapses them into one Case figure, matching how Client Proposal and
-// Behavioral each already show as a single total.
-function groupedGraderTotals(sectionTotals: Record<string, number>): Array<{ key: string; label: string; value: number }> {
+// One grader's canonical section totals split Case across 4 sub-sections
+// (case, case_quant, case_brainstorm, case_conclusion) since each is
+// scored/scaled separately, but that's noise here -- the raw per-criterion
+// breakdown right below already shows framework/quant/brainstorm/conclusion
+// individually, so this collapses them into one Case figure, matching how
+// Client Proposal and Behavioral each already show as a single total.
+function groupedGraderTotals(round: Round, sectionScores: Record<string, Record<string, number | string>>): Array<{ key: string; label: string; value: number }> {
+  const { sectionTotals } = computeCanonicalTotals(round, sectionScores);
   const out: Array<{ key: string; label: string; value: number }> = [];
   if ('behavioral' in sectionTotals) out.push({ key: 'behavioral', label: 'Behavioral', value: sectionTotals.behavioral });
   if ('client_proposal' in sectionTotals) out.push({ key: 'client_proposal', label: 'Client Proposal', value: sectionTotals.client_proposal });
@@ -639,10 +685,10 @@ function SortableRow({
                       {[s.interviewer_name, s.co_interviewer_name].filter(Boolean).join(', ')}
                       {s.room_label ? ` — ${s.room_label}` : ''}
                     </span>
-                    <span className="tabular-nums">{s.total_score.toFixed(1)}</span>
+                    <span className="tabular-nums">{computeCanonicalTotals(round, s.section_scores || {}).total.toFixed(1)}</span>
                   </div>
                   <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
-                    {groupedGraderTotals(s.section_totals || {}).map(({ key, label, value }) => (
+                    {groupedGraderTotals(round, s.section_scores || {}).map(({ key, label, value }) => (
                       <span key={key}>{label}: {value.toFixed(1)}</span>
                     ))}
                   </div>
