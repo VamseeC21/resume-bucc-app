@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useCallback, useMemo } from 'react';
+import { Fragment, useState, useEffect, useCallback, useMemo, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor,
   useSensor, useSensors, DragEndEvent,
@@ -65,6 +65,10 @@ interface DeliberationRow {
   avg_score?: number | null;
   score_count?: number;
   scores?: ScoreDetail[] | null;
+  // R2 only: candidate's average R1 total_score (already on a 0-100 scale),
+  // carried in so the 15% R1-performance slice of R2's total can be added
+  // on top of avg_score -- see totalFor().
+  r1_avg_score?: number | null;
   // resume round only
   elo_rating?: number | null;
   video_avg_score?: number | null;
@@ -144,6 +148,16 @@ function avgSectionTotals(row: DeliberationRow): Record<string, number> {
   return out;
 }
 
+// The four case-flavored sections (R1 just has 'case'; R2 splits it into
+// framework/quant/brainstorm/conclusion) roll up into one "Case" category.
+function caseKeysFor(sectionKeys: string[]): string[] {
+  return sectionKeys.filter((k) => k === 'case' || k.startsWith('case_'));
+}
+
+// section_totals values are already weighted (see ROUND_CONFIGS.computeTotal
+// in Interview.tsx -- R1 sections sum to 100, R2 sections sum to 85 pending
+// the R1-carryover slice added in totalFor), so these category rollups are
+// just a sum of the relevant averaged section_totals, not a fresh weighting.
 function categoriesFor(row: DeliberationRow, round: Round, sectionKeys: string[]): Category[] {
   if (round === 'RESUME') {
     return [
@@ -156,12 +170,38 @@ function categoriesFor(row: DeliberationRow, round: Round, sectionKeys: string[]
       },
     ];
   }
+  const hasScores = (row.scores || []).length > 0;
   const avgs = avgSectionTotals(row);
-  return sectionKeys.map((k) => ({ key: k, label: k, value: avgs[k] ?? null }));
+  const caseKeys = caseKeysFor(sectionKeys);
+
+  return [
+    {
+      key: 'client_proposal',
+      label: 'Presentation',
+      value: hasScores && sectionKeys.includes('client_proposal') ? avgs['client_proposal'] ?? 0 : null,
+    },
+    {
+      key: 'case_total',
+      label: 'Case',
+      value: hasScores && caseKeys.length > 0 ? caseKeys.reduce((s, k) => s + (avgs[k] ?? 0), 0) : null,
+    },
+    {
+      key: 'behavioral',
+      label: 'Behavioral',
+      value: hasScores && sectionKeys.includes('behavioral') ? avgs['behavioral'] ?? 0 : null,
+    },
+  ];
 }
 
 function totalFor(row: DeliberationRow, round: Round): { label: string; value: number | null } {
   if (round === 'RESUME') return { label: 'Combined', value: row.combined_score ?? null };
+  if (round === 'R2') {
+    if (row.avg_score == null) return { label: 'Avg Total', value: null };
+    // 15% of R2's total comes from R1 performance, layered on here since an
+    // individual R2 grader's submitted total_score never includes it.
+    const r1Contribution = ((row.r1_avg_score ?? 0) / 100) * 15;
+    return { label: 'Avg Total', value: row.avg_score + r1Contribution };
+  }
   return { label: 'Avg Total', value: row.avg_score ?? null };
 }
 
@@ -183,7 +223,64 @@ function commentsFor(row: DeliberationRow): string {
 }
 
 function scoreValueFor(row: DeliberationRow, round: Round): number | null {
-  return round === 'RESUME' ? row.combined_score ?? null : row.avg_score ?? null;
+  return totalFor(row, round).value;
+}
+
+const LABEL_OVERRIDES: Record<string, string> = { bucc: 'BUCC', cep: 'CEP', gbm: 'GBM' };
+
+// Turns a raw section/criterion key (e.g. "intro_why_bucc") into a readable
+// label for the per-grader breakdown, without needing to import the full
+// rubric config from the Interview grading page.
+function prettyLabel(key: string): string {
+  if (LABEL_OVERRIDES[key]) return LABEL_OVERRIDES[key];
+  return key.split('_').map((w) => LABEL_OVERRIDES[w] || (w.charAt(0).toUpperCase() + w.slice(1))).join(' ');
+}
+
+// One grader's section_totals splits Case across 4 sub-sections (case,
+// case_quant, case_brainstorm, case_conclusion) since each is scored/scaled
+// separately, but that's noise here -- the raw per-criterion breakdown right
+// below already shows framework/quant/brainstorm/conclusion individually, so
+// this collapses them into one Case figure, matching how Client Proposal and
+// Behavioral each already show as a single total.
+function groupedGraderTotals(sectionTotals: Record<string, number>): Array<{ key: string; label: string; value: number }> {
+  const out: Array<{ key: string; label: string; value: number }> = [];
+  if ('behavioral' in sectionTotals) out.push({ key: 'behavioral', label: 'Behavioral', value: sectionTotals.behavioral });
+  if ('client_proposal' in sectionTotals) out.push({ key: 'client_proposal', label: 'Client Proposal', value: sectionTotals.client_proposal });
+
+  const caseKeys = Object.keys(sectionTotals).filter((k) => k === 'case' || k.startsWith('case_'));
+  if (caseKeys.length > 0) {
+    out.push({ key: 'case', label: 'Case', value: caseKeys.reduce((s, k) => s + sectionTotals[k], 0) });
+  }
+  return out;
+}
+
+// Fixed left-to-right order for the raw per-criterion breakdown -- Behavioral
+// first, then every Case sub-section together, then Client Proposal -- since
+// object key order on section_scores isn't guaranteed to match the order the
+// interview is actually conducted in.
+const SUBSECTION_ORDER = ['behavioral', 'case', 'case_quant', 'case_brainstorm', 'case_conclusion', 'client_proposal'];
+
+function subsectionCategory(sectionKey: string): string {
+  return sectionKey === 'case' || sectionKey.startsWith('case_') ? 'case' : sectionKey;
+}
+
+// Flattens one grader's raw section_scores into an ordered list of criterion
+// labels/values, marking the first item of each category (behavioral / case
+// / client_proposal) so the caller can drop a separator in between.
+function subsectionItems(sectionScores: Record<string, Record<string, number | string>>): Array<{ key: string; label: string; value: number | string; newGroup: boolean }> {
+  const items: Array<{ key: string; label: string; value: number | string; newGroup: boolean }> = [];
+  let lastCategory: string | null = null;
+  SUBSECTION_ORDER.forEach((sectionKey) => {
+    const criteria = sectionScores[sectionKey];
+    if (!criteria) return;
+    const category = subsectionCategory(sectionKey);
+    Object.entries(criteria).forEach(([criterionKey, value]) => {
+      if (criterionKey.endsWith('_variant')) return;
+      items.push({ key: `${sectionKey}-${criterionKey}`, label: prettyLabel(criterionKey), value, newGroup: category !== lastCategory });
+      lastCategory = category;
+    });
+  });
+  return items;
 }
 
 function csvCell(value: unknown): string {
@@ -325,6 +422,16 @@ function SortableRow({
   const total = totalFor(row, round);
   const isResume = round === 'RESUME';
 
+  // Clicking anywhere on the row (not just the chevron) toggles the
+  // per-grader breakdown -- except over an interactive cell (Notes, Graders,
+  // Comments, links, checkbox, drag handle), since those already have their
+  // own click behavior and shouldn't also toggle the row open/closed.
+  const handleRowClick = (e: ReactMouseEvent<HTMLTableRowElement>) => {
+    if (!row.scores?.length) return;
+    if ((e.target as HTMLElement).closest('[data-no-row-click]')) return;
+    onToggleExpand(row.round_candidate_id);
+  };
+
   const notesInput = (
     <Popover>
       <PopoverTrigger asChild>
@@ -417,21 +524,27 @@ function SortableRow({
 
   const graders = gradersFor(row);
   const recommendations = recommendationsFor(row);
-  const colCount = 18 + sectionKeys.length;
+  const colCount = 21;
 
   return (
     <>
-      <tr ref={setNodeRef} style={{ ...style, backgroundColor: hex ? `${hex}14` : undefined }} className={`border-b border-border text-xs align-middle ${dimmed ? 'opacity-50' : ''}`}>
+      <tr
+        ref={setNodeRef}
+        style={{ ...style, backgroundColor: hex ? `${hex}14` : undefined }}
+        className={`border-b border-border text-xs align-middle ${dimmed ? 'opacity-50' : ''} ${row.scores?.length ? 'cursor-pointer hover:bg-muted/30' : ''}`}
+        onClick={handleRowClick}
+      >
         <td className="px-2 py-1 text-center tabular-nums select-none text-muted-foreground" style={{ borderLeft: hex ? `6px solid ${hex}` : '6px solid transparent' }} title="Position in current order">
           {position}
         </td>
-        <td className="px-1 py-1">
+        <td className="px-1 py-1" data-no-row-click>
           <button type="button" className="cursor-grab active:cursor-grabbing text-muted-foreground touch-none" {...attributes} {...listeners} aria-label="Drag to reorder">
             <GripVertical className="w-3.5 h-3.5" />
           </button>
         </td>
         <td
           className="px-1 py-1"
+          data-no-row-click
           onClickCapture={(e) => {
             if (e.shiftKey) {
               e.preventDefault();
@@ -444,6 +557,9 @@ function SortableRow({
         </td>
         <td className="px-2 py-1 tabular-nums text-muted-foreground whitespace-nowrap">{row.candidate_number ? `#${row.candidate_number}` : '—'}</td>
         <td className="px-2 py-1 font-medium max-w-[220px] truncate" title={fullName(row)}>{fullName(row)}</td>
+        <td className="px-2 py-1 text-right font-semibold tabular-nums">
+          {total.value !== null ? total.value.toFixed(1) : '—'}
+        </td>
         <td className="px-2 py-1 text-muted-foreground whitespace-nowrap">{row.year?.slice(0, 4)}</td>
         <td className="px-2 py-1 text-muted-foreground max-w-[140px] truncate" title={row.major || ''}>{row.major || '—'}</td>
         <td className="px-2 py-1 text-muted-foreground whitespace-nowrap">{row.gender || '—'}</td>
@@ -461,13 +577,10 @@ function SortableRow({
             {c.value !== null ? c.value.toFixed(1) : '—'}
           </td>
         ))}
-        <td className="px-2 py-1 text-right font-semibold tabular-nums">
-          {total.value !== null ? total.value.toFixed(1) : '—'}
-        </td>
-        <td className="px-2 py-1 max-w-[180px]"><ExpandableText label="Graders" value={graders} /></td>
-        <td className="px-2 py-1 max-w-[220px]"><CommentsCell scores={row.scores || []} candidateName={fullName(row)} /></td>
-        <td className="px-2 py-1 max-w-[220px]">{notesInput}</td>
-        <td className="px-2 py-1">
+        <td className="px-2 py-1 max-w-[180px]" data-no-row-click><ExpandableText label="Graders" value={graders} /></td>
+        <td className="px-2 py-1 max-w-[220px]" data-no-row-click><CommentsCell scores={row.scores || []} candidateName={fullName(row)} /></td>
+        <td className="px-2 py-1 max-w-[220px]" data-no-row-click>{notesInput}</td>
+        <td className="px-2 py-1" data-no-row-click>
           <span className="flex gap-1">
             {row.video_youtube_url && (
               <button type="button" onClick={() => window.open(row.video_youtube_url!, '_blank')} title="Watch video">
@@ -484,7 +597,7 @@ function SortableRow({
         <td className="px-2 py-1 text-muted-foreground tabular-nums text-right">{row.application_ranking ?? '—'}</td>
         <td className="px-2 py-1 text-center">{row.was_in_r1 ? <CheckCircle className="w-3.5 h-3.5 text-green-600 mx-auto" /> : '—'}</td>
         <td className="px-2 py-1 text-center">{row.was_in_r2 ? <CheckCircle className="w-3.5 h-3.5 text-green-600 mx-auto" /> : '—'}</td>
-        <td className="px-1 py-1">
+        <td className="px-1 py-1" data-no-row-click>
           <Button
             type="button" variant="ghost" size="sm" className="h-6 w-6 p-0"
             disabled={!row.scores?.length}
@@ -500,8 +613,13 @@ function SortableRow({
           <td colSpan={colCount} className="px-4 pb-3 pt-2">
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">Per-grader breakdown</p>
+              {round === 'R2' && row.r1_avg_score != null && (
+                <p className="text-xs text-muted-foreground">
+                  R1 avg score (15% of total): {row.r1_avg_score.toFixed(1)} / 100
+                </p>
+              )}
               {(row.scores || []).map((s, i) => (
-                <div key={i} className="text-sm space-y-1">
+                <div key={i} className="text-sm space-y-1.5 pb-2 border-b border-border/50 last:border-0 last:pb-0">
                   <div className="flex justify-between">
                     <span className="font-medium">
                       {[s.interviewer_name, s.co_interviewer_name].filter(Boolean).join(', ')}
@@ -510,12 +628,28 @@ function SortableRow({
                     <span className="tabular-nums">{s.total_score.toFixed(1)}</span>
                   </div>
                   <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
-                    {Object.entries(s.section_totals || {}).map(([k, v]) => (
-                      <span key={k}>{k}: {v.toFixed(1)}</span>
+                    {groupedGraderTotals(s.section_totals || {}).map(({ key, label, value }) => (
+                      <span key={key}>{label}: {value.toFixed(1)}</span>
                     ))}
+                  </div>
+                  {(() => {
+                    const items = subsectionItems(s.section_scores || {});
+                    if (items.length === 0) return null;
+                    return (
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground/80 pl-2 border-l-2 border-border/40">
+                        {items.map((item, idx) => (
+                          <Fragment key={item.key}>
+                            {item.newGroup && idx > 0 && <span className="text-muted-foreground/40" aria-hidden="true">|</span>}
+                            <span>{item.label}: {item.value}</span>
+                          </Fragment>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                  <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
                     {s.candidate_phone && <span>Phone: {s.candidate_phone}</span>}
                     {Object.entries(s.availability || {}).map(([k, v]) => (
-                      <span key={k}>{k}: {v ? 'Yes' : 'No'}</span>
+                      <span key={k}>{prettyLabel(k)}: {v ? 'Yes' : 'No'}</span>
                     ))}
                   </div>
                   {s.glaring_concerns && <p className="text-xs text-amber-700">Concerns: {s.glaring_concerns}</p>}
@@ -877,14 +1011,16 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
           colorLabel(r.color), r.notes || '', r.video_youtube_url || '', resumeUrl,
         ]);
       } else {
-        headers = ['ID', 'Name', 'Email', 'Year', 'Major', 'Gender', 'Recommendations', ...sectionKeys, 'Avg Total', 'Graders', 'Comments', 'Notes', 'Color', 'App Rank', 'Video Link', 'Resume Link'];
+        headers = ['ID', 'Name', 'Avg Total', 'Email', 'Year', 'Major', 'Gender', 'Recommendations', 'Presentation Avg Total', 'Case Avg Total', 'Behavioral Avg Total', 'Graders', 'Comments', 'Notes', 'Color', 'App Rank', 'Video Link', 'Resume Link'];
         csvRows = withLinks.map(({ r, resumeUrl }) => {
-          const avgs = avgSectionTotals(r);
+          const cats = categoriesFor(r, round, sectionKeys);
+          const catValue = (key: string) => cats.find((c) => c.key === key)?.value?.toFixed(1) ?? '';
           return [
-            r.candidate_number ?? '', fullName(r), r.applicant_email, r.year, r.major || '', r.gender || '',
+            r.candidate_number ?? '', fullName(r), totalFor(r, round).value?.toFixed(1) ?? '',
+            r.applicant_email, r.year, r.major || '', r.gender || '',
             recommendationsFor(r).join('; '),
-            ...sectionKeys.map((k) => (avgs[k] !== undefined ? avgs[k].toFixed(1) : '')),
-            r.avg_score?.toFixed(1) ?? '', gradersFor(r), commentsFor(r), r.notes || '',
+            catValue('client_proposal'), catValue('case_total'), catValue('behavioral'),
+            gradersFor(r), commentsFor(r), r.notes || '',
             colorLabel(r.color), r.application_ranking ?? '', r.video_youtube_url || '', resumeUrl,
           ];
         });
@@ -1074,14 +1210,14 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
                     <th className="px-1 pb-1.5" />
                     <th className="px-2 pb-1.5 font-medium"><SortHeader label="ID" sortKey="id" getValue={(r) => r.candidate_number ?? null} sortState={sortState} onSort={sortRows} /></th>
                     <th className="px-2 pb-1.5 font-medium"><SortHeader label="Name" sortKey="name" getValue={(r) => fullName(r)} sortState={sortState} onSort={sortRows} /></th>
+                    <th className="px-2 pb-1.5 font-medium"><SortHeader label="Avg Total" sortKey="score" getValue={(r) => scoreValueFor(r, round)} align="right" sortState={sortState} onSort={sortRows} /></th>
                     <th className="px-2 pb-1.5 font-medium"><SortHeader label="Year" sortKey="year" getValue={(r) => r.year} sortState={sortState} onSort={sortRows} /></th>
                     <th className="px-2 pb-1.5 font-medium"><SortHeader label="Major" sortKey="major" getValue={(r) => r.major} sortState={sortState} onSort={sortRows} /></th>
                     <th className="px-2 pb-1.5 font-medium">Gender</th>
                     <th className="px-2 pb-1.5 font-medium">Rec.</th>
-                    {sectionKeys.map((k) => (
-                      <th key={k} className="px-2 pb-1.5 font-medium"><SortHeader label={k} sortKey={`sec:${k}`} getValue={(r) => avgSectionTotals(r)[k] ?? null} align="right" sortState={sortState} onSort={sortRows} /></th>
-                    ))}
-                    <th className="px-2 pb-1.5 font-medium"><SortHeader label="Avg Total" sortKey="score" getValue={(r) => scoreValueFor(r, round)} align="right" sortState={sortState} onSort={sortRows} /></th>
+                    <th className="px-2 pb-1.5 font-medium"><SortHeader label="Presentation" sortKey="cat:client_proposal" getValue={(r) => categoriesFor(r, round, sectionKeys).find((c) => c.key === 'client_proposal')?.value ?? null} align="right" sortState={sortState} onSort={sortRows} /></th>
+                    <th className="px-2 pb-1.5 font-medium"><SortHeader label="Case" sortKey="cat:case_total" getValue={(r) => categoriesFor(r, round, sectionKeys).find((c) => c.key === 'case_total')?.value ?? null} align="right" sortState={sortState} onSort={sortRows} /></th>
+                    <th className="px-2 pb-1.5 font-medium"><SortHeader label="Behavioral" sortKey="cat:behavioral" getValue={(r) => categoriesFor(r, round, sectionKeys).find((c) => c.key === 'behavioral')?.value ?? null} align="right" sortState={sortState} onSort={sortRows} /></th>
                     <th className="px-2 pb-1.5 font-medium">Graders</th>
                     <th className="px-2 pb-1.5 font-medium">Comments</th>
                     <th className="px-2 pb-1.5 font-medium">Notes</th>
@@ -1097,7 +1233,7 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
                     <tbody>
                       {(() => {
                         const cutoff = advanceCounts[round];
-                        const colCount = 18 + sectionKeys.length;
+                        const colCount = 21;
                         return rows.map((row, index) => (
                           <Fragment key={row.round_candidate_id}>
                             {cutoff !== null && cutoff > 0 && cutoff < rows.length && index === cutoff && (

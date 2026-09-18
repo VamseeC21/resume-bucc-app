@@ -315,16 +315,27 @@ Please be very detailed in your notes if you selected "Maybe" — include your o
     needsPresentationUpload: true,
     needsPhoneNumber: true,
     needsGlaringConcerns: true,
-    // No weighting was specified for R2 (unlike R1's stated 50/50) -- totaling
-    // as a flat sum of every criterion. Revisit if a weighting scheme is given.
+    // Weighting: 40% Client Proposal (Presentation), 40% Case (framework +
+    // quant + brainstorm + conclusion), 5% intro/"why BUCC", 15% R1
+    // performance. The 15% R1 carryover isn't available on this form (a
+    // single grader doesn't see another round's scores), so it's layered on
+    // top of this total at deliberation time (see get_round_deliberation) --
+    // this function's total maxes out at 85, not 100.
     computeTotal: (raw) => {
-      const sectionTotals: Record<string, number> = {};
-      let total = 0;
-      for (const [sectionKey, values] of Object.entries(raw)) {
-        const sum = Object.values(values).reduce((s, v) => s + (v || 0), 0);
-        sectionTotals[sectionKey] = sum;
-        total += sum;
-      }
+      const caseSectionKeys = ['case', 'case_quant', 'case_brainstorm', 'case_conclusion'];
+      const sumOf = (sectionKey: string) => Object.values(raw[sectionKey] || {}).reduce((s, v) => s + (v || 0), 0);
+
+      const behavioralRaw = sumOf('behavioral'); // max 4
+      const clientProposalRaw = sumOf('client_proposal'); // max 16
+      const caseRawBySection = Object.fromEntries(caseSectionKeys.map((k) => [k, sumOf(k)])); // each max 4, combined max 16
+
+      const sectionTotals: Record<string, number> = {
+        behavioral: (behavioralRaw / 4) * 5,
+        client_proposal: (clientProposalRaw / 16) * 40,
+      };
+      caseSectionKeys.forEach((k) => { sectionTotals[k] = (caseRawBySection[k] / 16) * 40; });
+
+      const total = Object.values(sectionTotals).reduce((s, v) => s + v, 0);
       return { total, sectionTotals };
     },
   },
