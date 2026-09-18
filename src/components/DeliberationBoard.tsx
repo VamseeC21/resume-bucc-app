@@ -20,7 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Textarea } from '@/components/ui/textarea';
 import {
   Loader2, GripVertical, ChevronDown, ChevronUp, Sparkles,
-  Download, X, FileText, Video,
+  Download, X, FileText, Video, Presentation as PresentationIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -222,6 +222,13 @@ function commentsFor(row: DeliberationRow): string {
   return (row.scores || []).map((s) => s.overall_impression).filter(Boolean).join(' | ');
 }
 
+// R2 only: whichever grader uploaded the candidate's client-proposal
+// presentation (co-interviewers share one room, so usually just one of them
+// did the upload).
+function presentationPathFor(row: DeliberationRow): string | null {
+  return (row.scores || []).find((s) => s.presentation_path)?.presentation_path ?? null;
+}
+
 function scoreValueFor(row: DeliberationRow, round: Round): number | null {
   return totalFor(row, round).value;
 }
@@ -394,7 +401,7 @@ function CommentsCell({ scores, candidateName }: { scores: ScoreDetail[]; candid
 
 function SortableRow({
   row, round, sectionKeys, position, selected, onToggleSelect, expanded, onToggleExpand,
-  onViewResume, onNotesChange, onNotesSave, dimmed,
+  onViewResume, onViewPresentation, onNotesChange, onNotesSave, dimmed,
 }: {
   row: DeliberationRow;
   round: Round;
@@ -405,6 +412,7 @@ function SortableRow({
   expanded: boolean;
   onToggleExpand: (id: string) => void;
   onViewResume: (resumeId: string) => void;
+  onViewPresentation?: (path: string) => void;
   onNotesChange: (id: string, notes: string) => void;
   onNotesSave: (id: string, notes: string) => void;
   dimmed?: boolean;
@@ -524,6 +532,7 @@ function SortableRow({
 
   const graders = gradersFor(row);
   const recommendations = recommendationsFor(row);
+  const presentationPath = presentationPathFor(row);
   const colCount = 21;
 
   return (
@@ -590,6 +599,11 @@ function SortableRow({
             {row.resume_id && (
               <button type="button" onClick={() => onViewResume(row.resume_id!)} title="View resume">
                 <FileText className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
+              </button>
+            )}
+            {presentationPath && (
+              <button type="button" onClick={() => onViewPresentation?.(presentationPath)} title="View client proposal presentation">
+                <PresentationIcon className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
               </button>
             )}
           </span>
@@ -855,6 +869,15 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
     if (signed) setPreviewUrl(signed.signedUrl);
   };
 
+  // Opens in a new tab rather than the resume's inline PDF preview dialog --
+  // client proposals get uploaded as whatever file type the room has on hand
+  // (PPTX, Keynote, PDF, ...), not all of which a browser can render inline.
+  const viewPresentation = async (path: string) => {
+    const { data: signed, error } = await supabase.storage.from('presentations').createSignedUrl(path, 3600);
+    if (error || !signed) { toast.error('Failed to load presentation'); return; }
+    window.open(signed.signedUrl, '_blank');
+  };
+
   const applyColor = async (color: string | null) => {
     if (selectedIds.size === 0) return;
     const ids = Array.from(selectedIds);
@@ -996,7 +1019,13 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
             resumeUrl = signed?.signedUrl || '';
           }
         }
-        return { r, resumeUrl };
+        let presentationUrl = '';
+        const presentationPath = presentationPathFor(r);
+        if (presentationPath) {
+          const { data: signed } = await supabase.storage.from('presentations').createSignedUrl(presentationPath, 86400);
+          presentationUrl = signed?.signedUrl || '';
+        }
+        return { r, resumeUrl, presentationUrl };
       }));
 
       let headers: string[];
@@ -1011,8 +1040,8 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
           colorLabel(r.color), r.notes || '', r.video_youtube_url || '', resumeUrl,
         ]);
       } else {
-        headers = ['ID', 'Name', 'Avg Total', 'Email', 'Year', 'Major', 'Gender', 'Recommendations', 'Presentation Avg Total', 'Case Avg Total', 'Behavioral Avg Total', 'Graders', 'Comments', 'Notes', 'Color', 'App Rank', 'Video Link', 'Resume Link'];
-        csvRows = withLinks.map(({ r, resumeUrl }) => {
+        headers = ['ID', 'Name', 'Avg Total', 'Email', 'Year', 'Major', 'Gender', 'Recommendations', 'Presentation Avg Total', 'Case Avg Total', 'Behavioral Avg Total', 'Graders', 'Comments', 'Notes', 'Color', 'App Rank', 'Video Link', 'Resume Link', 'Presentation Link'];
+        csvRows = withLinks.map(({ r, resumeUrl, presentationUrl }) => {
           const cats = categoriesFor(r, round, sectionKeys);
           const catValue = (key: string) => cats.find((c) => c.key === key)?.value?.toFixed(1) ?? '';
           return [
@@ -1021,7 +1050,7 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
             recommendationsFor(r).join('; '),
             catValue('client_proposal'), catValue('case_total'), catValue('behavioral'),
             gradersFor(r), commentsFor(r), r.notes || '',
-            colorLabel(r.color), r.application_ranking ?? '', r.video_youtube_url || '', resumeUrl,
+            colorLabel(r.color), r.application_ranking ?? '', r.video_youtube_url || '', resumeUrl, presentationUrl,
           ];
         });
       }
@@ -1253,6 +1282,7 @@ export default function DeliberationBoard({ gameId, gameName }: { gameId: string
                               expanded={expandedId === row.round_candidate_id}
                               onToggleExpand={(id) => setExpandedId((prev) => (prev === id ? null : id))}
                               onViewResume={viewResume}
+                              onViewPresentation={viewPresentation}
                               onNotesChange={updateNotesLocal}
                               onNotesSave={saveNotes}
                               dimmed={cutoff !== null && index >= cutoff}
